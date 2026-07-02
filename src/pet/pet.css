@@ -1,0 +1,66 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  width: 120px;
+  height: 112px;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: relative;
+  width: 120px;
+  height: 112px;
+}
+
+#frog {
+  position: absolute;
+  inset: 0;
+  image-rendering: pixelated;
+}
+
+.petbtn {
+  position: absolute;
+  top: 4px;
+  width: 16px;
+  height: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(30, 30, 40, 0.72);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+
+#quit {
+  top: 56px;
+  right: 8px;
+  background: rgba(206, 54, 54, 0.9);
+}
+
+#gear {
+  top: 76px;
+  right: 8px;
+}
+
+#gear:hover {
+  background: rgba(30, 30, 40, 0.95);
+  transform: rotate(35deg);
+}
+
+#quit:hover {
+  background: rgba(226, 42, 42, 1);
+}
+
+.petbtn.visible {
+  display: flex;
+}

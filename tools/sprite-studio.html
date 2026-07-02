@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Froggy Sprite Studio</title>
+    <style>
+      :root {
+        --bg: #14161c;
+        --panel: #1c1f27;
+        --panel2: #232733;
+        --line: #333a49;
+        --text: #e8ebf0;
+        --muted: #97a0b3;
+        --accent: #4caf50;
+        --accent2: #5a8fe8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 13px;
+      }
+      header {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      header h1 { font-size: 15px; margin: 0; font-weight: 700; }
+      header .hint { color: var(--muted); font-size: 12px; }
+      .layout {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 0;
+        height: calc(100vh - 50px);
+      }
+      .col { overflow: auto; padding: 16px; }
+      .col.left { border-right: 1px solid var(--line); }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      .card h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 0 0 12px;
+      }
+      label.row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      label.row span { color: var(--muted); }
+      input[type="number"] {
+        width: 74px;
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 5px 7px;
+        font-size: 13px;
+      }
+      input[type="range"] { width: 160px; }
+      select, button {
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+      button.small { padding: 3px 7px; font-size: 12px; }
+      .grid-wrap {
+        overflow: auto;
+        background: #0e1014;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        max-height: 46vh;
+      }
+      #sheetCanvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+      .controls-inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+      .tabs button.active { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+      .preview-stage {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+      }
+      #previewCanvas {
+        image-rendering: pixelated;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+      }
+      .checker {
+        background-image:
+          linear-gradient(45deg, #2a2f3a 25%, transparent 25%),
+          linear-gradient(-45deg, #2a2f3a 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #2a2f3a 75%),
+          linear-gradient(-45deg, transparent 75%, #2a2f3a 75%);
+        background-size: 16px 16px;
+        background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+      }
+      .frames { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+      .frame-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--panel2);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 8px;
+      }
+      .frame-item canvas { image-rendering: pixelated; border-radius: 4px; background: #0e1014; }
+      .frame-item .idx { width: 26px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .frame-item input { width: 62px; }
+      .frame-item .sp { flex: 1; }
+      textarea {
+        width: 100%;
+        height: 200px;
+        background: #0e1014;
+        color: #cfe3cf;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 11px;
+      }
+      .swatches { display: flex; gap: 6px; }
+      .swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+      .swatch.sel { border-color: #fff; }
+      .muted { color: var(--muted); }
+      .flex { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .space { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Froggy Sprite Studio</h1>
+      <span class="hint">Click a frame in the sheet to append it to the selected animation. Tune, preview, then Export.</span>
+      <span class="space"></span>
+      <button id="loadDefaults" class="small">Reset to pet defaults</button>
+    </header>
+
+    <div class="layout">
+      <!-- LEFT: sheet + alignment -->
+      <div class="col left">
+        <div class="card">
+          <h2>Spritesheet</h2>
+          <div class="flex" style="margin-bottom:10px">
+            <div class="swatches" id="swatches"></div>
+            <span class="space"></span>
+            <label class="small muted">or load file
+              <input type="file" id="fileInput" accept="image/png,image/*" style="display:none" />
+            </label>
+            <button class="small" id="pickFile">Choose PNG</button>
+          </div>
+          <div class="grid-wrap">
+            <canvas id="sheetCanvas"></canvas>
+          </div>
+          <div class="flex" style="margin-top:10px">
+            <label class="row" style="margin:0"><span>Zoom</span>
+              <input type="range" id="sheetZoom" min="2" max="20" step="1" />
+            </label>
+            <span class="space"></span>
+            <button class="small" id="autoDetect">Auto-detect grid</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Grid alignment</h2>
+          <div class="flex" style="align-items:flex-start;gap:24px">
+            <div style="flex:1">
+              <label class="row"><span>frame width</span><input type="number" id="frameW" /></label>
+              <label class="row"><span>frame height</span><input type="number" id="frameH" /></label>
+              <label class="row"><span>columns</span><input type="number" id="cols" /></label>
+              <label class="row"><span>rows</span><input type="number" id="rows" /></label>
+            </div>
+            <div style="flex:1">
+              <label class="row"><span>offset X</span><input type="number" id="offsetX" /></label>
+              <label class="row"><span>offset Y</span><input type="number" id="offsetY" /></label>
+              <label class="row"><span>spacing X</span><input type="number" id="spacingX" /></label>
+              <label class="row"><span>spacing Y</span><input type="number" id="spacingY" /></label>
+            </div>
+          </div>
+          <label class="row" style="margin-top:6px"><span>show frame numbers</span>
+            <input type="checkbox" id="showNums" checked />
+          </label>
+        </div>
+      </div>
+
+      <!-- RIGHT: animation editor + preview + export -->
+      <div class="col right">
+        <div class="card">
+          <h2>Preview</h2>
+          <div class="preview-stage">
+            <canvas id="previewCanvas" width="200" height="200" class="checker"></canvas>
+            <div style="flex:1">
+              <label class="row"><span>scale</span><input type="range" id="previewScale" min="2" max="12" step="1" /></label>
+              <label class="row"><span>playing</span><input type="checkbox" id="playing" checked /></label>
+              <div class="muted" id="previewInfo"></div>
+              <button class="small" id="restart" style="margin-top:6px">Restart</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Animation</h2>
+          <div class="tabs" id="animTabs">
+            <button data-anim="idle">idle</button>
+            <button data-anim="hop">hop</button>
+            <button data-anim="jump">jump</button>
+            <button data-anim="snooze">snooze</button>
+          </div>
+
+          <label class="row"><span>loop</span><input type="checkbox" id="a_loop" /></label>
+          <label class="row"><span>arc height (px)</span><input type="number" id="a_arcHeight" /></label>
+          <label class="row"><span>arc start (0-1)</span><input type="number" id="a_arcStart" step="0.01" min="0" max="1" /></label>
+          <label class="row"><span>arc end (0-1)</span><input type="number" id="a_arcEnd" step="0.01" min="0" max="1" /></label>
+          <label class="row"><span>squash (0-1)</span><input type="number" id="a_squash" step="0.05" min="0" max="1" /></label>
+
+          <div class="flex" style="margin-top:8px">
+            <strong>Frames</strong>
+            <span class="space"></span>
+            <span class="muted" id="totalDur"></span>
+          </div>
+          <div class="frames" id="framesList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Pet parameters</h2>
+          <div id="paramGroups"></div>
+        </div>
+
+        <div class="card">
+          <h2>Export</h2>
+          <div class="flex" style="margin-bottom:8px">
+            <button class="small" id="copyJson">Copy JSON</button>
+            <button class="small" id="copyJs">Copy pet.js snippet</button>
+            <span class="space"></span>
+            <select id="exportMode">
+              <option value="json">JSON</option>
+              <option value="js">pet.js snippet</option>
+            </select>
+          </div>
+          <textarea id="exportOut" readonly></textarea>
+        </div>
+      </div>
+    </div>
+
+    <script src="sprite-studio.js"></script>
+  </body>
+</html>

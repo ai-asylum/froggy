@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <link rel="stylesheet" href="input.css" />
+  </head>
+  <body>
+    <div id="card">
+      <div id="title">What have you been up to?</div>
+      <textarea id="entry" rows="2" placeholder="A quick line about what you're working on..." autofocus></textarea>
+      <div id="row">
+        <button id="skip" class="ghost">Skip</button>
+        <div class="spacer"></div>
+        <span id="hint">Enter to save</span>
+        <button id="save" class="primary">Save</button>
+      </div>
+    </div>
+    <script src="input.js"></script>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <div id="card">
+      <div id="header">
+        <span>Froggy settings</span>
+        <button id="close" class="x" aria-label="Close">x</button>
+      </div>
+
+      <label class="field">
+        <span class="lbl">Save notes to</span>
+        <div class="folder">
+          <span id="dest" class="path"></span>
+          <button id="pick">Change</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="lbl">Frog color</span>
+        <div id="colors" class="colors"></div>
+      </label>
+
+      <label class="field">
+        <span class="lbl">Transparency</span>
+        <div class="interval">
+          <input id="opacity" type="range" min="0.2" max="1" step="0.05" />
+          <span id="opacityVal"></span>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="lbl">Prompt me every</span>
+        <div class="interval">
+          <input id="interval" type="number" min="1" max="720" step="1" />
+          <span>minutes</span>
+          <button id="test" class="ghost">Test jump</button>
+        </div>
+      </label>
+
+      <label class="field row">
+        <span class="lbl">Launch at login</span>
+        <input id="autolaunch" type="checkbox" />
+      </label>
+
+      <label class="field row">
+        <span class="lbl">Auto-push notes (git)</span>
+        <input id="autopush" type="checkbox" />
+      </label>
+      <div id="autopush-hint" class="hint"></div>
+
+      <div id="footer">
+        <div id="status"></div>
+        <button id="quit" class="ghost danger">Quit Froggy</button>
+      </div>
+    </div>
+    <script src="settings.js"></script>
+  </body>
+</html>
