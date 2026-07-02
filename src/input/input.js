@@ -26,9 +26,10 @@ entry.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     save();
-  } else if (e.key === 'Escape') {
-    window.api.send('input:close');
   }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') window.api.send('input:close');
 });
 
 window.api.on('input:init', (state) => {

@@ -110,5 +110,89 @@ document.getElementById('test').addEventListener('click', () => {
 
 document.getElementById('close').addEventListener('click', () => window.close());
 document.getElementById('quit').addEventListener('click', () => window.api.send('app:quit'));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') window.close();
+});
+
+// --- Multiplayer -----------------------------------------------------------
+const selfCodeEl = document.getElementById('selfcode');
+const friendCodeEl = document.getElementById('friendcode');
+
+async function loadSelfCode() {
+  const { selfId } = await window.api.invoke('friends:list');
+  selfCodeEl.textContent = selfId || '(generating...)';
+  selfCodeEl.title = selfId || '';
+}
+
+async function refreshNetStatus() {
+  const el = document.getElementById('netstatus');
+  const s = await window.api.invoke('net:status');
+  if (s && s.configured) {
+    el.textContent = 'Connected. Friend requests will be delivered.';
+    el.className = 'netstatus on';
+  } else {
+    el.textContent =
+      'Offline: add your Supabase URL + anon key under "Connection setup" below before adding friends.';
+    el.className = 'netstatus off';
+  }
+}
+
+document.getElementById('copycode').addEventListener('click', async () => {
+  const code = selfCodeEl.textContent.trim();
+  if (code) {
+    try {
+      await navigator.clipboard.writeText(code);
+      flash('Code copied');
+    } catch {
+      flash('Copy failed');
+    }
+  }
+});
+
+document.getElementById('addfriend').addEventListener('click', async () => {
+  const code = friendCodeEl.value.trim();
+  if (!code) {
+    friendCodeEl.focus();
+    return;
+  }
+  const res = await window.api.invoke('friends:add', { code });
+  if (res && res.ok) {
+    friendCodeEl.value = '';
+    flash('Invite sent');
+  } else {
+    flash((res && res.error) || 'Could not send');
+  }
+});
+
+// Connection setup (Supabase + TURN).
+async function loadConnection() {
+  const cfg = await window.api.invoke('settings:get');
+  const sb = cfg.supabase || {};
+  const turn = cfg.turn || {};
+  document.getElementById('sb-url').value = sb.url || '';
+  document.getElementById('sb-key').value = sb.anonKey || '';
+  document.getElementById('turn-url').value = turn.urls || '';
+  document.getElementById('turn-user').value = turn.username || '';
+  document.getElementById('turn-cred').value = turn.credential || '';
+}
+
+document.getElementById('save-conn').addEventListener('click', async () => {
+  await window.api.invoke('settings:set', {
+    supabase: {
+      url: document.getElementById('sb-url').value.trim(),
+      anonKey: document.getElementById('sb-key').value.trim()
+    },
+    turn: {
+      urls: document.getElementById('turn-url').value.trim(),
+      username: document.getElementById('turn-user').value.trim(),
+      credential: document.getElementById('turn-cred').value.trim()
+    }
+  });
+  flash('Connection saved');
+  refreshNetStatus();
+});
 
 load();
+loadSelfCode();
+loadConnection();
+refreshNetStatus();

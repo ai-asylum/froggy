@@ -1,0 +1,82 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#card {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100vh;
+  padding: 12px;
+  background: rgba(28, 33, 30, 0.96);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#title {
+  font: 600 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #cfe8d8;
+}
+
+#who {
+  color: #8fd6a8;
+}
+
+#entry {
+  flex: 1;
+  resize: none;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f7f4;
+  font: 400 13px -apple-system, BlinkMacSystemFont, sans-serif;
+  outline: none;
+}
+
+#entry:focus {
+  border-color: #5fb85f;
+}
+
+#row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+#hint {
+  font: 400 10px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+button {
+  font: 600 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.primary {
+  background: #5fb85f;
+  color: #10240f;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

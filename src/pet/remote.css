@@ -1,0 +1,148 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  width: 120px;
+  height: 176px;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+#stage {
+  position: relative;
+  width: 120px;
+  height: 176px;
+}
+
+/* The frog sits at the bottom; the top 64px is headroom for the bubble. */
+#frog {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 120px;
+  height: 112px;
+  image-rendering: pixelated;
+}
+
+.nametag {
+  position: absolute;
+  left: 50%;
+  top: 52px;
+  transform: translateX(-50%);
+  max-width: 112px;
+  padding: 1px 7px;
+  font: 600 10px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(30, 30, 40, 0.72);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.nametag.visible {
+  opacity: 1;
+}
+
+.bubble {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  transform: translateX(-50%) translateY(6px);
+  max-width: 116px;
+  padding: 6px 9px;
+  font: 500 11px -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.3;
+  color: #1c2b24;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+}
+
+/* DM bubbles are interactive so their close button can be clicked. */
+.bubble.dm {
+  pointer-events: auto;
+}
+
+.bubble.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Shout: red-outlined, all caps, no close button (auto-hides). */
+.bubble.shout {
+  border: 2px solid #e24646;
+  color: #7a1b1b;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.bubbleclose {
+  display: none;
+  margin-left: 6px;
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.12);
+  color: #1c2b24;
+  font-size: 12px;
+  line-height: 12px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.bubbleclose:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+.bubble.dm .bubbleclose {
+  display: inline-block;
+}
+
+.closebtn {
+  position: absolute;
+  right: 6px;
+  top: 66px;
+  width: 16px;
+  height: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(206, 54, 54, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.closebtn:hover {
+  background: rgba(226, 42, 42, 1);
+}
+.closebtn.visible {
+  display: flex;
+}
+
+.bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid #ffffff;
+}

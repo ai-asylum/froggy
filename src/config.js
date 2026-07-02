@@ -1,4 +1,5 @@
 const { app } = require('electron');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -18,7 +19,24 @@ const DEFAULTS = {
   author: 'ruben.gres',
   autoLaunch: true,
   // When the destination folder is a git repo, commit + push after saving.
-  autoPush: false
+  autoPush: false,
+
+  // --- Multiplayer ---------------------------------------------------------
+  // A short, shareable friend code (e.g. "7K2Q-9XPN"), also used as the id.
+  selfId: null,
+  // The name friends see on a request. Falls back to `author` when empty.
+  displayName: '',
+  // Friends: [{ id, label, status }] where status is one of
+  // 'pending' (you asked, awaiting them), 'incoming' (they asked you),
+  // 'accepted' (mutual — their frog spawns when online).
+  friends: [],
+  // Last-known window position for each remote frog, keyed by friend id.
+  remotePositions: {},
+  // Supabase is used only to link peers (signaling + presence). No frog
+  // state or messages ever pass through it — those go P2P over WebRTC.
+  supabase: { url: '', anonKey: '' },
+  // TURN relay used only when a direct P2P connection can't be established.
+  turn: { urls: '', username: '', credential: '' }
 };
 
 function load() {
@@ -41,4 +59,40 @@ function save(patch) {
   return next;
 }
 
-module.exports = { load, save, DEFAULTS, CONFIG_PATH };
+// Crockford-style base32 without ambiguous characters (no I, L, O, U).
+const CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const CODE_RE = /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;
+
+// A short, readable friend code like "7K2Q-9XPN".
+function generateCode() {
+  const bytes = crypto.randomBytes(8);
+  let s = '';
+  for (let i = 0; i < 8; i++) s += CODE_ALPHABET[bytes[i] % 32];
+  return `${s.slice(0, 4)}-${s.slice(4, 8)}`;
+}
+
+// Normalize user-typed codes: uppercase, drop spaces, re-insert the dash.
+function normalizeCode(input) {
+  const raw = String(input || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  if (raw.length === 8) return `${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
+  return String(input || '').trim().toUpperCase();
+}
+
+// Generate and persist a short friend code on first run (migrating any older
+// uuid-style id to the new short format).
+function ensureIdentity() {
+  const cfg = load();
+  if (!CODE_RE.test(cfg.selfId || '')) return save({ selfId: generateCode() });
+  return cfg;
+}
+
+module.exports = {
+  load,
+  save,
+  ensureIdentity,
+  generateCode,
+  normalizeCode,
+  isValidCode: (c) => CODE_RE.test(String(c || '')),
+  DEFAULTS,
+  CONFIG_PATH
+};

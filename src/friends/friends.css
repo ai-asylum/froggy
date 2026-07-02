@@ -1,0 +1,200 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#card {
+  box-sizing: border-box;
+  margin: 8px;
+  height: calc(100vh - 16px);
+  border-radius: 16px;
+  background: rgba(28, 30, 38, 0.97);
+  color: #eef0f3;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 14px 16px 12px;
+  -webkit-app-region: drag;
+}
+
+.x {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 14px;
+  cursor: pointer;
+}
+.x:hover {
+  color: #fff;
+}
+
+#scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 2px 16px 14px;
+}
+
+.field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.lbl {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+
+.text {
+  box-sizing: border-box;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #fff;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.text:focus {
+  outline: none;
+  border-color: #4caf50;
+}
+
+.folder {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.path {
+  flex: 1;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.addfriend {
+  display: flex;
+  gap: 8px;
+}
+.addfriend .text {
+  flex: 1;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #4caf50;
+  color: #fff;
+}
+button:hover {
+  background: #43a047;
+}
+
+.netstatus {
+  font-size: 11px;
+  line-height: 1.35;
+  margin-bottom: 14px;
+  padding: 7px 9px;
+  border-radius: 8px;
+}
+.netstatus.off {
+  background: rgba(226, 150, 42, 0.16);
+  color: #f0b96b;
+}
+.netstatus.on {
+  background: rgba(95, 227, 143, 0.14);
+  color: #8fe3a8;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.list:not(:empty) {
+  margin-bottom: 12px;
+}
+
+.friend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.friend .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  flex: 0 0 auto;
+}
+.friend .dot.online {
+  background: #5fe38f;
+  box-shadow: 0 0 6px rgba(95, 227, 143, 0.8);
+}
+
+.friend .name {
+  font-weight: 600;
+}
+.friend .id {
+  flex: 1;
+  opacity: 0.45;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.friend .pendtag {
+  font-size: 10px;
+  opacity: 0.55;
+  font-style: italic;
+}
+.friend .rm {
+  background: transparent;
+  color: rgba(255, 140, 140, 0.85);
+  padding: 2px 6px;
+}
+.friend .rm:hover {
+  color: #ff6b6b;
+}
+.friend .accept {
+  padding: 3px 8px;
+}
+
+#friends:empty::after {
+  content: 'No friends yet — send an invite above.';
+  font-size: 11px;
+  opacity: 0.45;
+}

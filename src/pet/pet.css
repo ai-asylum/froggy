@@ -4,8 +4,8 @@ body {
   padding: 0;
   background: transparent;
   overflow: hidden;
-  width: 120px;
-  height: 112px;
+  width: 160px;
+  height: 150px;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
@@ -13,8 +13,8 @@ body {
 
 #stage {
   position: relative;
-  width: 120px;
-  height: 112px;
+  width: 160px;
+  height: 150px;
 }
 
 #frog {
@@ -23,9 +23,50 @@ body {
   image-rendering: pixelated;
 }
 
+/* The three big action buttons, arranged in a semi-circle over the frog. */
+.arcbtn {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  font-size: 15px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(30, 30, 40, 0.82);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.arcbtn:hover {
+  background: rgba(45, 45, 58, 0.96);
+  transform: scale(1.12);
+}
+.arcbtn.visible {
+  display: flex;
+}
+
+#friend {
+  left: 14px;
+  top: 44px;
+}
+#journal {
+  left: 65px;
+  top: 15px;
+}
+#shout {
+  left: 116px;
+  top: 44px;
+}
+
+/* Small utility buttons (settings / quit) tucked into the bottom corners. */
 .petbtn {
   position: absolute;
-  top: 4px;
+  bottom: 6px;
   width: 16px;
   height: 16px;
   display: none;
@@ -41,22 +82,18 @@ body {
   transition: background 0.12s ease, transform 0.12s ease;
 }
 
-#quit {
-  top: 56px;
-  right: 8px;
-  background: rgba(206, 54, 54, 0.9);
-}
-
 #gear {
-  top: 76px;
-  right: 8px;
+  left: 6px;
+}
+#quit {
+  right: 6px;
+  background: rgba(206, 54, 54, 0.9);
 }
 
 #gear:hover {
   background: rgba(30, 30, 40, 0.95);
   transform: rotate(35deg);
 }
-
 #quit:hover {
   background: rgba(226, 42, 42, 1);
 }

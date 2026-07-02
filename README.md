@@ -30,6 +30,12 @@ That's it! Froggy appears on top of your other windows. Drag it wherever you lik
 
 Default destination: `~/.froggy/` (changeable in settings).
 
+> **Note:** keystroke-hops use the optional native module `uiohook-napi`. If it can't build on your platform, `npm install` still succeeds and the app runs fine — you just won't get hops on every key press.
+
+## Multiplayer (optional)
+
+Froggy is single-player out of the box. To spawn friends' frogs and send shouts/DMs, add Supabase Realtime credentials in **Settings → Connection setup** (URL + anon key). Signaling/presence go through Supabase; frog state and messages flow peer-to-peer over WebRTC.
+
 ## Sprite Studio (tweak tool)
 
 A standalone web tool to visually align the spritesheet and design the idle,
@@ -48,8 +54,15 @@ src/
   preload.js         Safe IPC bridge to renderers
   config.js          Loads/saves config.json in userData
   notes.js           Writes each entry as a Markdown file
-  pet/               The frog: canvas sprite animation, drag, click-through, gear
+  git.js             Optional auto-commit/push of the notes folder
+  pet/               The frog: shared canvas engine, local + remote frog windows
   input/             The write-an-entry popup
   settings/          Settings panel
+  friends/           Friends panel (invite, accept, online status)
+  shout/             Shout-to-everyone composer
+  message/           Speak (direct message) composer
+  invite/            Incoming friend-invite popup
+  name/              First-run "name your frog" popup
+  net/               Supabase signaling + hidden WebRTC mesh renderer
 assets/              The 6 frog spritesheets + tray icon
 ```

@@ -12,6 +12,7 @@
         <button id="close" class="x" aria-label="Close">x</button>
       </div>
 
+      <div id="scroll">
       <label class="field">
         <span class="lbl">Save notes to</span>
         <div class="folder">
@@ -52,6 +53,51 @@
         <input id="autopush" type="checkbox" />
       </label>
       <div id="autopush-hint" class="hint"></div>
+
+      <hr class="sep" />
+      <div class="section-title">Multiplayer</div>
+      <div id="netstatus" class="netstatus"></div>
+
+      <label class="field">
+        <span class="lbl">Your friend code</span>
+        <div class="folder">
+          <span id="selfcode" class="path"></span>
+          <button id="copycode">Copy</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span class="lbl">Invite a friend</span>
+        <div class="addfriend">
+          <input id="friendcode" class="text" placeholder="Their code (ABCD-1234)" />
+          <button id="addfriend">Send invite</button>
+        </div>
+      </label>
+
+      <details id="advanced">
+        <summary>Connection setup</summary>
+        <label class="field">
+          <span class="lbl">Supabase URL</span>
+          <input id="sb-url" class="text" placeholder="https://xxxx.supabase.co" />
+        </label>
+        <label class="field">
+          <span class="lbl">Supabase anon key</span>
+          <input id="sb-key" class="text" placeholder="eyJ..." />
+        </label>
+        <label class="field">
+          <span class="lbl">TURN URL (optional)</span>
+          <input id="turn-url" class="text" placeholder="turn:host:3478" />
+        </label>
+        <label class="field">
+          <span class="lbl">TURN user / credential (optional)</span>
+          <div class="addfriend">
+            <input id="turn-user" class="text" placeholder="user" />
+            <input id="turn-cred" class="text" placeholder="credential" />
+          </div>
+        </label>
+        <button id="save-conn">Save connection</button>
+      </details>
+      </div>
 
       <div id="footer">
         <div id="status"></div>

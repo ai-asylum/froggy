@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <link rel="stylesheet" href="friends.css" />
+  </head>
+  <body>
+    <div id="card">
+      <div id="header">
+        <span>Friends</span>
+        <button id="close" class="x" aria-label="Close">x</button>
+      </div>
+
+      <div id="scroll">
+        <div id="netstatus" class="netstatus"></div>
+
+        <label class="field">
+          <span class="lbl">Your name</span>
+          <input id="displayname" class="text" placeholder="How friends see you" />
+        </label>
+
+        <label class="field">
+          <span class="lbl">Your friend code</span>
+          <div class="folder">
+            <span id="selfcode" class="path"></span>
+            <button id="copycode">Copy</button>
+          </div>
+        </label>
+
+        <label class="field">
+          <span class="lbl">Invite a friend</span>
+          <div class="addfriend">
+            <input id="friendcode" class="text" placeholder="Their code (ABCD-1234)" />
+            <button id="addfriend">Send</button>
+          </div>
+        </label>
+
+        <div id="requests" class="list"></div>
+        <div id="friends" class="list"></div>
+      </div>
+    </div>
+    <script src="friends.js"></script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';" />
+    <link rel="stylesheet" href="remote.css" />
+  </head>
+  <body>
+    <div id="stage">
+      <div id="bubble" class="bubble">
+        <span id="bubbletext"></span>
+        <button id="bubbleclose" class="bubbleclose" aria-label="Close">×</button>
+      </div>
+      <div id="nametag" class="nametag"></div>
+      <button id="close" class="closebtn" title="Remove friend" aria-label="Remove friend">
+        <svg viewBox="0 0 24 24" width="9" height="9" aria-hidden="true">
+          <path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+      <canvas id="frog" width="120" height="112"></canvas>
+    </div>
+    <script src="engine.js"></script>
+    <script src="remote.js"></script>
+  </body>
+</html>
