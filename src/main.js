@@ -183,9 +183,10 @@ function createPetWindow() {
 
   petWin.loadFile(path.join(__dirname, 'pet', 'index.html'));
 
-  // If something's already notifying when the pet (re)loads, hide its badge.
+  // If something's already notifying when the pet (re)loads, replay it so the
+  // pet can hide the app buttons and flash the notifier's icon.
   petWin.webContents.on('did-finish-load', () => {
-    if (frogNotifying && petWin) petWin.webContents.send('frog:notify', true);
+    if (frogNotifyKey && petWin) petWin.webContents.send('frog:notify', frogNotifyInfo());
   });
 
   petWin.on('closed', () => {
@@ -362,27 +363,30 @@ function scheduleHourly() {
   }, delay);
 }
 
-// Grab attention with a jump, then bring up the panel once it lands (opening
-// the panel settles the frog back to idle).
+// A journal reminder. If the composer is already up, just surface it; otherwise
+// grab attention like any other app: a jump + dance plus a pending notification,
+// so the journal icon flashes on the frog and a tap opens the composer (which
+// acknowledges the nag — see the onInteract below).
 function nag() {
   if (inputWin) {
     inputWin.show();
     inputWin.focus();
     return;
   }
-  bigJump();
-  setTimeout(() => {
-    if (attentionActive) openInputWindow();
-  }, 850);
+  frogAlert();
+  notifyOnFrog('journal', () => {
+    stopAttention();
+    openInputWindow();
+    return true;
+  });
 }
 
 function startAttention() {
   attentionActive = true;
-  syncFrogNotify();
   sleeping = false; // an attention jump wakes the frog
   nag();
   if (snoozeTimer) clearInterval(snoozeTimer);
-  // Keep nagging every 4 minutes until an entry is written or skipped, but
+  // Keep reminding every 4 minutes until an entry is written or skipped, but
   // don't jump while the panel is already open and waiting.
   snoozeTimer = setInterval(() => {
     if (!attentionActive || inputWin) return;
@@ -392,7 +396,7 @@ function startAttention() {
 
 function stopAttention() {
   attentionActive = false;
-  syncFrogNotify();
+  clearFrogNotification('journal');
   if (snoozeTimer) {
     clearInterval(snoozeTimer);
     snoozeTimer = null;
@@ -1081,20 +1085,38 @@ function applyAutoLaunch() {
 // (e.g. it went stale), we fall through to the normal frog-click behavior so a
 // forgotten notification never silently eats a tap.
 let pendingNotification = null; // { source, onInteract }
-let frogNotifying = false; // last state pushed to the pet window
+let frogNotifyKey = ''; // identity of the state last pushed to the pet ('' = none)
 
-// The frog's slot badge hides whenever a tap would be intercepted rather than
-// launch the slot's app — i.e. while an app is notifying, a friend invite is
-// waiting, or the journal is nagging. Push that state to the pet so it can hide
-// the badge and let the notifier take visual priority.
+// A simple person glyph for friend-invite notifications (no registry app).
+const FRIEND_ICON =
+  '<path fill="currentColor" d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/>';
+
+// What's currently grabbing the frog's attention, if anything, resolved to the
+// icon/color to flash on the frog. Priority matches the pet:click handler: a
+// notifying app (the journal reminder is one of these now), then a waiting
+// friend invite.
+function frogNotifyInfo() {
+  if (pendingNotification) {
+    const a = apps.get(pendingNotification.source);
+    return { active: true, icon: (a && a.icon) || null, color: (a && a.color) || null, name: (a && a.name) || pendingNotification.source };
+  }
+  const cfg = config.load();
+  if ((cfg.friends || []).some((f) => f.status === 'incoming')) {
+    return { active: true, icon: FRIEND_ICON, color: '#e87fb0', name: 'Friend request' };
+  }
+  return { active: false };
+}
+
+// Whenever a tap would be intercepted rather than launch the frog's slot app —
+// i.e. while an app is notifying, a friend invite is waiting, or the journal is
+// nagging — tell the pet: it hides the app buttons and flashes the notifier's
+// icon in the center to make it super clear what wants attention.
 function syncFrogNotify() {
-  const next =
-    !!pendingNotification ||
-    attentionActive ||
-    (config.load().friends || []).some((f) => f.status === 'incoming');
-  if (next === frogNotifying) return;
-  frogNotifying = next;
-  if (petWin) petWin.webContents.send('frog:notify', next);
+  const info = frogNotifyInfo();
+  const key = info.active ? String(info.name || 'on') : '';
+  if (key === frogNotifyKey) return;
+  frogNotifyKey = key;
+  if (petWin) petWin.webContents.send('frog:notify', info);
 }
 
 function notifyOnFrog(source, onInteract) {
@@ -1157,17 +1179,19 @@ function togglePomodoro() {
 // ---------------------------------------------------------------------------
 // Water reminder app
 // ---------------------------------------------------------------------------
+function fireWaterReminder(message) {
+  notify('Drink water', message);
+  danceLocal();
+  // Tapping the frog acknowledges it — restart the countdown from now.
+  notifyOnFrog('water', () => {
+    waterReminder.reschedule();
+    return true;
+  });
+}
+
 const waterReminder = createReminder({
   getConfig: () => config.load().water || {},
-  onRemind: (message) => {
-    notify('Drink water', message);
-    danceLocal();
-    // Tapping the frog acknowledges it — restart the countdown from now.
-    notifyOnFrog('water', () => {
-      waterReminder.reschedule();
-      return true;
-    });
-  }
+  onRemind: fireWaterReminder
 });
 
 // ---------------------------------------------------------------------------
@@ -1190,15 +1214,17 @@ function pushCountdown(state) {
   if (petWin) petWin.webContents.send('countdown:state', state);
 }
 
+function fireCountdownDone(message, color) {
+  markActivity();
+  notify('Countdown', message);
+  frogAlert();
+  openCountdownAlert(message, color);
+}
+
 const countdown = createCountdown({
   getConfig: () => ({ ...(config.load().countdown || {}), color: countdownColor() }),
   onTick: (state) => pushCountdown(state),
-  onDone: (message, color) => {
-    markActivity();
-    notify('Countdown', message);
-    frogAlert();
-    openCountdownAlert(message, color);
-  }
+  onDone: fireCountdownDone
 });
 
 function toggleCountdown() {
@@ -1258,9 +1284,18 @@ function openCountdownAlert(message, color) {
 // ---------------------------------------------------------------------------
 // Owns the composer window; we hand it the frog's geometry and a broadcaster
 // that fans the message out to every connected friend over the P2P mesh.
+// Echo a shout on your own frog so you see what you just yelled (also used by
+// the settings "Test shout" button to preview the bubble locally).
+function showLocalShout(text) {
+  const t = String(text || '').slice(0, 200).toUpperCase();
+  if (!t) return;
+  if (petWin) petWin.webContents.send('shout:show', { text: t });
+}
+
 const shout = createShout({
   getPetBounds: () => petUrl(),
   broadcast: (text) => {
+    showLocalShout(text);
     if (netWin) netWin.webContents.send('mesh:broadcast', { type: 'shout', text });
   },
   preloadPath: path.join(__dirname, 'preload.js'),
@@ -1311,15 +1346,15 @@ function registerIpc() {
       openFriendsWindow();
       return;
     }
-    // A journal nag waiting? The tap acknowledges it: stop jumping, open the
-    // composer.
-    if (attentionActive) {
-      stopAttention();
+    // (A waiting journal nag is handled above via the notification system —
+    // it registers as a pending notification whose tap opens the composer.)
+    // Otherwise the frog is itself a slot (the 4th): launch the app assigned to
+    // it, or open the picker so you can assign one. When the frog button is
+    // disabled, a tap falls back to opening the journal composer instead.
+    if (cfg.frogButton === false) {
       openInputWindow();
       return;
     }
-    // Otherwise the frog is itself a slot (the 4th): launch the app assigned to
-    // it, or open the picker so you can assign one.
     const frogApp = (cfg.slots || [])[FROG_SLOT];
     if (frogApp) launchApp(frogApp);
     else openSlotPicker(FROG_SLOT);
@@ -1338,8 +1373,12 @@ function registerIpc() {
     if (id) launchApp(id);
     else openSlotPicker(index);
   });
-  // Long-press / right-click -> always open the picker to change/clear.
-  ipcMain.on('pet:edit-slot', (_e, index) => openSlotPicker(index));
+  // Long-press / right-click -> always open the picker to change/clear. The
+  // frog slot (index 3) is only editable while the frog button is enabled.
+  ipcMain.on('pet:edit-slot', (_e, index) => {
+    if (index === FROG_SLOT && config.load().frogButton === false) return;
+    openSlotPicker(index);
+  });
 
   // The picker asks for the current slots + app catalog to render itself.
   ipcMain.handle('slots:context', () => ({
@@ -1387,6 +1426,23 @@ function registerIpc() {
 
   // Shout: normalize + broadcast an all-caps message to every connected friend.
   ipcMain.on('shout:send', (_e, { text }) => shout.send(text));
+
+  // Preview a shout on your own frog without broadcasting it to friends.
+  ipcMain.handle('shout:test', () => {
+    showLocalShout('This is a test shout!');
+  });
+
+  // Fire the end-of-countdown alert right now so you can preview it.
+  ipcMain.handle('countdown:test', () => {
+    const message = String((config.load().countdown || {}).message || '').trim() || 'Time\u2019s up!';
+    fireCountdownDone(message, countdownColor());
+  });
+
+  // Fire a water reminder right now so you can preview the notification.
+  ipcMain.handle('water:test', () => {
+    const message = String((config.load().water || {}).message || '').trim() || 'Time to drink some water!';
+    fireWaterReminder(message);
+  });
 
   ipcMain.handle('note:save', (_e, text) => {
     const cfg = config.load();
@@ -1459,7 +1515,9 @@ function registerIpc() {
   });
 
   // Manual trigger (used by settings "test" button) to preview the big jump.
-  ipcMain.on('pet:test-jump', () => bigJump());
+  // Preview the journal reminder on demand: the frog hops + dances and flashes
+  // the journal icon (a one-off notification), just like the hourly nag.
+  ipcMain.on('pet:test-jump', () => nag());
 
   ipcMain.on('app:quit', () => quitApp());
 

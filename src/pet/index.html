@@ -26,12 +26,21 @@
       <!-- Shared hover label; centered so it never clips the small window. -->
       <div id="tip" aria-hidden="true"></div>
 
+      <!-- Speech bubble for your own shouts: a red, all-caps bubble that floats
+           above the frog's head and auto-hides. Filled by pet.js on shout:show. -->
+      <div id="bubble" class="bubble" aria-hidden="true"><span id="bubbletext"></span></div>
+
       <!-- Semi-circle of app slots above the frog (shown on hover). Each is
            filled from config.slots by pet.js: click launches the app, an empty
            slot or a long-press / right-click opens the picker. -->
       <button class="arcbtn slot" data-slot="0" aria-label="App slot 1"></button>
       <button class="arcbtn slot" data-slot="1" aria-label="App slot 2"></button>
       <button class="arcbtn slot" data-slot="2" aria-label="App slot 3"></button>
+
+      <!-- Notification beacon: while an app / friend invite / journal nag wants
+           attention, pet.js hides the app buttons and flashes this in the center
+           slot's spot with the notifier's icon. Purely a signal — tap the frog. -->
+      <div id="notif" class="notif" aria-hidden="true"></div>
 
       <button id="gear" class="petbtn" title="Settings" aria-label="Settings" data-tip="Settings">
         <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">

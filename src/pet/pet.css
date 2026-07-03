@@ -124,6 +124,50 @@ body {
   opacity: 1;
 }
 
+/* Speech bubble for your own shouts, floating above the frog's head. Purely a
+   readout — click-through — and auto-hidden by pet.js after a few seconds. */
+.bubble {
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  transform: translateX(-50%) translateY(6px);
+  max-width: 148px;
+  padding: 6px 9px;
+  font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #1c2b24;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  text-align: center;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 13;
+}
+.bubble.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.bubble.shout {
+  border: 2px solid #e24646;
+  color: #7a1b1b;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid #ffffff;
+}
+
 /* The three big action buttons, arranged in a semi-circle over the frog. */
 .arcbtn {
   /* Outline is a lighter tint of each button's own color.
@@ -192,20 +236,20 @@ body {
   filter: brightness(0.9);
 }
 
-/* The frog's own slot: a small badge riding on its body, always visible so you
-   can see (and get at) the app the frog launches. Non-interactive — the frog
-   beneath it handles the clicks. Sits a touch left-of-centre over the belly;
-   nudge top/left here to reposition on the sprite. */
+/* The frog's own slot: a small badge riding on its body. Non-interactive — the
+   frog beneath it handles the clicks. The sprite is drawn in a 64px box centered
+   at canvas x=80, spanning y=80..144, so we center the badge over the belly
+   (left 63 -> center 80; top 100 -> center ~117). Nudge top/left to reposition. */
 .petslot {
   --arc-lighten: 45%;
   --arc-outline: color-mix(in srgb, var(--arc-color) calc(100% - var(--arc-lighten)), #fff);
   position: absolute;
   box-sizing: border-box;
   left: 63px;
-  top: 108px;
+  top: 100px;
   width: 34px;
   height: 34px;
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
   border: 3px solid var(--arc-outline);
@@ -220,6 +264,15 @@ body {
 .petslot svg {
   display: block;
 }
+/* Shown only while the frog is hovered, like the arc slots. */
+.petslot.visible {
+  display: flex;
+}
+/* Frog button disabled in settings: the frog is no longer a slot, so never
+   show its badge (wins over .visible). */
+.petslot.off {
+  display: none !important;
+}
 /* Empty: a faint dashed "+" invite, like an unassigned arc slot. */
 .petslot.empty {
   --arc-color: rgba(30, 30, 40, 0.5);
@@ -232,9 +285,57 @@ body {
   transform: scale(0.92);
   filter: brightness(0.9);
 }
-/* Hidden while an app is notifying so the notifier takes visual priority. */
-.petslot.hushed {
+/* --- Notification beacon --------------------------------------------------
+   While an app / friend invite / journal nag wants attention, pet.js puts
+   `.frog-notifying` on <body>. We hide every app button (arc slots + frog
+   badge) so nothing competes, and flash the notifier's icon where the center
+   slot normally sits. Kept last so these rules win over .visible. */
+.frog-notifying .slot,
+.frog-notifying .petslot {
+  display: none !important;
+}
+
+.notif {
+  --arc-lighten: 45%;
+  --arc-outline: color-mix(in srgb, var(--arc-color) calc(100% - var(--arc-lighten)), #fff);
+  position: absolute;
+  box-sizing: border-box;
+  left: 58px; /* centered on the top-center (slot 1) position */
+  top: 8px;
+  width: 44px;
+  height: 44px;
   display: none;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--arc-outline);
+  border-radius: 50%;
+  color: #fff;
+  background: var(--arc-color, rgba(30, 30, 40, 0.82));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  z-index: 12;
+}
+.notif svg {
+  display: block;
+}
+.frog-notifying .notif {
+  display: flex;
+  animation: notif-flash 0.9s ease-in-out infinite;
+}
+@keyframes notif-flash {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45),
+      0 0 0 0 color-mix(in srgb, var(--arc-color) 55%, transparent);
+  }
+  50% {
+    transform: scale(1.16);
+    opacity: 0.6;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45),
+      0 0 0 9px color-mix(in srgb, var(--arc-color) 0%, transparent);
+  }
 }
 
 /* Small utility buttons (settings / quit) tucked into the bottom corners. */

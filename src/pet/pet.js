@@ -30,13 +30,33 @@ window.api.on('entry:saved', () => engine.celebrate());
 window.api.on('config:updated', (cfg) => {
   if (cfg && cfg.color) engine.setColor(cfg.color);
   if (cfg && typeof cfg.scale === 'number') applyScale(cfg.scale);
+  if (cfg && 'frogButton' in cfg) applyFrogButton(cfg.frogButton);
   if (cfg && Array.isArray(cfg.slots)) renderSlots(cfg.slots);
 });
 // While an app is notifying (or a friend invite / journal nag is waiting), hide
-// the frog's slot badge so the notifier has priority — a tap goes to it, not the
-// slot's app.
-window.api.on('frog:notify', (on) => {
-  if (petSlotEl) petSlotEl.classList.toggle('hushed', !!on);
+// every app button (the arc slots + the frog's own slot badge) and flash the
+// notifier's icon in the center instead, so it's unmistakable what wants a tap.
+const notifEl = document.getElementById('notif');
+window.api.on('frog:notify', (info) => {
+  const active = !!(info && info.active);
+  document.body.classList.toggle('frog-notifying', active);
+  if (active && notifEl) {
+    notifEl.style.setProperty('--arc-color', (info && info.color) || 'rgba(30,30,40,0.82)');
+    notifEl.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">${(info && info.icon) || ''}</svg>`;
+  }
+});
+
+// --- Shout echo ------------------------------------------------------------
+// Your own shouts (and the settings "Test shout") appear here in a red, all-caps
+// bubble above the frog that auto-hides after a few seconds.
+const bubbleEl = document.getElementById('bubble');
+const bubbleTextEl = document.getElementById('bubbletext');
+let bubbleTimer = null;
+window.api.on('shout:show', ({ text }) => {
+  clearTimeout(bubbleTimer);
+  bubbleTextEl.textContent = String(text || '').toUpperCase();
+  bubbleEl.classList.add('shout', 'visible');
+  bubbleTimer = setTimeout(() => bubbleEl.classList.remove('visible'), 8000);
 });
 
 // --- Shared timer overlay (Pomodoro + Countdown) ---------------------------
@@ -135,6 +155,15 @@ const FROG_SLOT = 3; // slots[0..2] are the arc buttons; slots[3] is the frog
 const petSlotEl = document.getElementById('petslot');
 const LONG_PRESS_MS = 450; // hold this long to open a slot's picker
 
+// When the frog button is disabled (settings toggle), the frog stops acting as
+// the 4th slot: no badge, no picker gesture, and a tap opens the journal (main
+// handles that fallback). Kept in sync via config:updated.
+let frogButtonEnabled = true;
+function applyFrogButton(enabled) {
+  frogButtonEnabled = enabled !== false;
+  if (petSlotEl) petSlotEl.classList.toggle('off', !frogButtonEnabled);
+}
+
 const PLUS_SVG =
   '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>';
 
@@ -179,6 +208,7 @@ function renderPetSlot(app) {
 Promise.all([window.api.invoke('apps:list'), window.api.invoke('settings:get')]).then(
   ([list, cfg]) => {
     for (const app of list || []) appsById.set(app.id, app);
+    applyFrogButton(cfg && cfg.frogButton);
     renderSlots((cfg && cfg.slots) || []);
   }
 );
@@ -220,12 +250,16 @@ function overButtons(x, y) {
 let down = null;
 let hideTimer = null;
 
+// Everything that fades in on hover: the arc slots, gear/quit, and the frog's
+// own slot badge (only shown while the frog is hovered, like the arc slots).
+const hoverEls = petSlotEl ? [...buttons, petSlotEl] : buttons;
+
 function keepGear() {
   if (hideTimer) {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
-  buttons.forEach((b) => b.classList.add('visible'));
+  hoverEls.forEach((b) => b.classList.add('visible'));
   setInteractive(true);
 }
 
@@ -233,7 +267,7 @@ function releaseGear() {
   if (hideTimer) return;
   hideTimer = setTimeout(() => {
     hideTimer = null;
-    buttons.forEach((b) => b.classList.remove('visible'));
+    hoverEls.forEach((b) => b.classList.remove('visible'));
     setInteractive(false);
   }, 600);
 }
@@ -277,7 +311,7 @@ function hideButtons() {
     clearTimeout(hideTimer);
     hideTimer = null;
   }
-  buttons.forEach((b) => b.classList.remove('visible'));
+  hoverEls.forEach((b) => b.classList.remove('visible'));
   setInteractive(false);
 }
 
@@ -301,14 +335,18 @@ window.addEventListener('mousedown', (e) => {
     winY: window.screenY,
     moved: false
   };
-  if (petSlotEl) petSlotEl.classList.add('pressing');
-  frogPressTimer = setTimeout(() => {
-    frogPressTimer = null;
-    if (!down || down.moved) return;
-    down = null; // consumed by the long-press: no drag / click follows
-    if (petSlotEl) petSlotEl.classList.remove('pressing');
-    window.api.send('pet:edit-slot', FROG_SLOT);
-  }, LONG_PRESS_MS);
+  // Only arm the long-press picker while the frog acts as a slot; otherwise the
+  // frog just drags / taps (the tap falls back to the journal in main).
+  if (frogButtonEnabled) {
+    if (petSlotEl) petSlotEl.classList.add('pressing');
+    frogPressTimer = setTimeout(() => {
+      frogPressTimer = null;
+      if (!down || down.moved) return;
+      down = null; // consumed by the long-press: no drag / click follows
+      if (petSlotEl) petSlotEl.classList.remove('pressing');
+      window.api.send('pet:edit-slot', FROG_SLOT);
+    }, LONG_PRESS_MS);
+  }
 });
 
 window.addEventListener('mouseup', () => {
@@ -332,7 +370,7 @@ window.addEventListener('contextmenu', (e) => {
   if (!engine.overFrog(e.clientX, e.clientY)) return;
   e.preventDefault();
   clearFrogPress();
-  window.api.send('pet:edit-slot', FROG_SLOT);
+  if (frogButtonEnabled) window.api.send('pet:edit-slot', FROG_SLOT);
 });
 
 // Slot gestures: a quick click launches the app (or opens the picker for an

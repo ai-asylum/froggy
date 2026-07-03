@@ -59,6 +59,9 @@ body {
 }
 
 /* Navigation rows that open the Appearance / Friends sub-views. */
+.nav[hidden] {
+  display: none;
+}
 .nav {
   -webkit-app-region: no-drag;
   width: 100%;

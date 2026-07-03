@@ -27,6 +27,9 @@ const DEFAULTS = {
   // body. Each entry is an app id (from src/apps/registry.js) or null for an
   // empty "+" slot.
   slots: [null, 'journal', 'shout', null],
+  // Whether the frog itself acts as the 4th quick-launch slot. When off, the
+  // frog shows no badge and a tap falls back to opening the journal.
+  frogButton: true,
   // Position is stored so the frog reappears where you left it.
   position: null,
   // Author handle written into note frontmatter.

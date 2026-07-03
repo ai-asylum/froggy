@@ -18,6 +18,7 @@ const scaleValEl = document.getElementById('scaleVal');
 const autoEl = document.getElementById('autolaunch');
 const autoPushEl = document.getElementById('autopush');
 const autoPushHintEl = document.getElementById('autopush-hint');
+const frogButtonEl = document.getElementById('frogbutton');
 const statusEl = document.getElementById('status');
 
 let state = {};
@@ -159,6 +160,7 @@ async function load() {
   scaleValEl.textContent = Math.round(sc * 100) + '%';
 
   autoEl.checked = !!state.autoLaunch;
+  frogButtonEl.checked = state.frogButton !== false;
   renderColors();
   refreshAutoPush();
 }
@@ -206,6 +208,11 @@ autoEl.addEventListener('change', async () => {
 
 autoPushEl.addEventListener('change', async () => {
   state = await window.api.invoke('settings:set', { autoPush: autoPushEl.checked });
+  flash('Saved');
+});
+
+frogButtonEl.addEventListener('change', async () => {
+  state = await window.api.invoke('settings:set', { frogButton: frogButtonEl.checked });
   flash('Saved');
 });
 
@@ -398,6 +405,11 @@ async function saveCountdown() {
 countdownMinsEl.addEventListener('change', saveCountdown);
 countdownMsgEl.addEventListener('change', saveCountdown);
 
+document.getElementById('countdown-test').addEventListener('click', async () => {
+  await saveCountdown();
+  await window.api.invoke('countdown:test');
+});
+
 // --- Drink water (app) -----------------------------------------------------
 const waterIntervalEl = document.getElementById('water-interval');
 const waterMessageEl = document.getElementById('water-message');
@@ -421,5 +433,15 @@ async function saveWater() {
 }
 waterIntervalEl.addEventListener('change', saveWater);
 waterMessageEl.addEventListener('change', saveWater);
+
+document.getElementById('water-test').addEventListener('click', async () => {
+  await saveWater();
+  await window.api.invoke('water:test');
+});
+
+// --- Shout (app) -----------------------------------------------------------
+document.getElementById('shout-test').addEventListener('click', () => {
+  window.api.invoke('shout:test');
+});
 
 load();

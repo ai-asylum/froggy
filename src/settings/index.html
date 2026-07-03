@@ -27,6 +27,12 @@
           </label>
           <div id="autopush-hint" class="hint"></div>
 
+          <label class="field row">
+            <span class="lbl">Frog launch button</span>
+            <input id="frogbutton" type="checkbox" />
+          </label>
+          <div class="hint">Use the frog itself as an extra app slot — tap it to launch, long-press to assign.</div>
+
           <hr class="sep" />
 
           <button class="nav accent" data-goto="apps" hidden>
@@ -124,7 +130,7 @@
         <!-- ======================= SHOUT (app) ========================== -->
         <section class="view" id="view-app-shout" hidden>
           <p class="appblurb">Shout sends an all-caps message to every connected friend at once. Open it from the megaphone button on your frog.</p>
-          <p class="appblurb muted">This app has no settings.</p>
+          <button id="shout-test" type="button" class="ghost">Test shout</button>
         </section>
 
         <!-- ====================== POMODORO (app) ======================== -->
@@ -173,6 +179,8 @@
             <span class="lbl">Message when it ends</span>
             <input id="countdown-message" class="text" placeholder="Time&rsquo;s up!" />
           </label>
+
+          <button id="countdown-test" type="button" class="ghost">Test alert</button>
         </section>
 
         <!-- ==================== DRINK WATER (app) ======================= -->
@@ -189,6 +197,8 @@
             <span class="lbl">Reminder message</span>
             <input id="water-message" class="text" placeholder="Time to drink some water!" />
           </label>
+
+          <button id="water-test" type="button" class="ghost">Test reminder</button>
         </section>
       </div>
 
