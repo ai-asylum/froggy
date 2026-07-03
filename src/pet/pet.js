@@ -32,11 +32,40 @@ window.api.on('config:updated', (cfg) => {
   if (cfg && typeof cfg.scale === 'number') applyScale(cfg.scale);
   if (cfg && 'frogButton' in cfg) applyFrogButton(cfg.frogButton);
   if (cfg && Array.isArray(cfg.slots)) renderSlots(cfg.slots);
+  applyAnimPrefs(cfg);
 });
+
+// The "disable animations" / "disable typing squish" appearance toggles.
+function applyAnimPrefs(cfg) {
+  if (!cfg) return;
+  engine.setTypingSquish(cfg.typingSquish !== false);
+  engine.setAnimationsEnabled(cfg.animations !== false);
+}
 // While an app is notifying (or a friend invite / journal nag is waiting), hide
 // every app button (the arc slots + the frog's own slot badge) and flash the
 // notifier's icon in the center instead, so it's unmistakable what wants a tap.
 const notifEl = document.getElementById('notif');
+
+// While a notification is pending the frog dances in bursts to stay noticeable:
+// four hops, a ~2s breather, then again — looping until the notification clears.
+const NOTIFY_DANCE_SPAN = 1000; // ~ four hops (matches engine.dance())
+const NOTIFY_DANCE_GAP = 2000; // pause between bursts
+let notifyDanceTimer = null;
+function startNotifyDance() {
+  if (notifyDanceTimer) return; // already looping
+  const burst = () => {
+    engine.dance();
+    notifyDanceTimer = setTimeout(burst, NOTIFY_DANCE_SPAN + NOTIFY_DANCE_GAP);
+  };
+  burst();
+}
+function stopNotifyDance() {
+  if (notifyDanceTimer) {
+    clearTimeout(notifyDanceTimer);
+    notifyDanceTimer = null;
+  }
+}
+
 window.api.on('frog:notify', (info) => {
   const active = !!(info && info.active);
   document.body.classList.toggle('frog-notifying', active);
@@ -44,6 +73,8 @@ window.api.on('frog:notify', (info) => {
     notifEl.style.setProperty('--arc-color', (info && info.color) || 'rgba(30,30,40,0.82)');
     notifEl.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">${(info && info.icon) || ''}</svg>`;
   }
+  if (active) startNotifyDance();
+  else stopNotifyDance();
 });
 
 // --- Shout echo ------------------------------------------------------------
@@ -146,6 +177,22 @@ window.api.invoke('countdown:get').then((st) => {
   applyOverlay();
 });
 
+// --- Reminder message readout ----------------------------------------------
+// A finished Water reminder / Countdown floats its message just above the frog
+// in the same pill as the timer, tinted with the app's accent, then auto-hides.
+const frogMsgEl = document.getElementById('frogmsg');
+const frogMsgLabelEl = document.getElementById('frogmsg-label');
+const frogMsgTextEl = document.getElementById('frogmsg-text');
+let frogMsgTimer = null;
+window.api.on('frog:message', ({ text, label, color } = {}) => {
+  clearTimeout(frogMsgTimer);
+  frogMsgLabelEl.textContent = String(label || '');
+  frogMsgTextEl.textContent = String(text || '');
+  frogMsgEl.style.setProperty('--timer-accent', color || 'rgba(255,255,255,0.82)');
+  frogMsgEl.classList.add('visible');
+  frogMsgTimer = setTimeout(() => frogMsgEl.classList.remove('visible'), 8000);
+});
+
 // --- App slots -------------------------------------------------------------
 // The three arc buttons + the frog itself (the 4th slot) are filled from
 // config.slots. We fetch the app catalog (id -> name/color/icon) once, then
@@ -154,6 +201,8 @@ const appsById = new Map();
 const FROG_SLOT = 3; // slots[0..2] are the arc buttons; slots[3] is the frog
 const petSlotEl = document.getElementById('petslot');
 const LONG_PRESS_MS = 450; // hold this long to open a slot's picker
+// Keep the CSS progress-ring animation in lockstep with the JS timer.
+document.documentElement.style.setProperty('--press-ms', LONG_PRESS_MS + 'ms');
 
 // When the frog button is disabled (settings toggle), the frog stops acting as
 // the 4th slot: no badge, no picker gesture, and a tap opens the journal (main
@@ -226,12 +275,23 @@ function applyScale(scale) {
 window.api.invoke('settings:get').then((cfg) => {
   if (cfg && cfg.color) engine.setColor(cfg.color, { silent: true });
   if (cfg && typeof cfg.scale === 'number') applyScale(cfg.scale);
+  applyAnimPrefs(cfg);
 });
 
 // --- Pixel-perfect click-through ------------------------------------------
 let interactive = false;
 
+// During the first-run "name your frog" step the frog is shown purely as a
+// preview perched on the naming card — clicks/drags/hover are all suppressed
+// until naming completes (main toggles this via pet:lock).
+let locked = false;
+window.api.on('pet:lock', (on) => {
+  locked = !!on;
+  if (locked) hideButtons();
+});
+
 function setInteractive(next) {
+  if (locked) next = false;
   if (next === interactive) return;
   interactive = next;
   window.api.send('pet:set-ignore', !next);
@@ -284,6 +344,7 @@ function clearFrogPress() {
 }
 
 window.addEventListener('mousemove', (e) => {
+  if (locked) return;
   if (down) {
     const dx = e.screenX - down.screenX;
     const dy = e.screenY - down.screenY;
@@ -325,6 +386,7 @@ window.addEventListener('blur', () => {
 });
 
 window.addEventListener('mousedown', (e) => {
+  if (locked) return;
   if (e.button !== 0) return; // only the left button drags / taps the frog
   if (buttons.some((b) => b === e.target || b.contains(e.target))) return;
   if (!engine.overFrog(e.clientX, e.clientY)) return;
@@ -362,20 +424,22 @@ window.addEventListener('mouseup', () => {
 });
 
 // The frog is just another button: a quick click launches its app (or hands the
-// tap to a notifying app / journal nag), while a right-click or long-press opens
-// its picker to change or clear the app — mirroring the arc slots. Slots handle
-// their own right-click, so we only act when the cursor is over the frog itself.
+// tap to a notifying app / journal nag), a long-press opens its picker to change
+// or clear the app, and a right-click jumps to that app's settings — mirroring
+// the arc slots. Slots handle their own right-click, so we only act when the
+// cursor is over the frog itself.
 window.addEventListener('contextmenu', (e) => {
+  if (locked) return;
   if (buttons.some((b) => b === e.target || b.contains(e.target))) return;
   if (!engine.overFrog(e.clientX, e.clientY)) return;
   e.preventDefault();
   clearFrogPress();
-  if (frogButtonEnabled) window.api.send('pet:edit-slot', FROG_SLOT);
+  if (frogButtonEnabled) window.api.send('pet:slot-settings', FROG_SLOT);
 });
 
-// Slot gestures: a quick click launches the app (or opens the picker for an
-// empty slot); a long-press or right-click always opens the picker so you can
-// change or clear the slot.
+// Slot gestures: a quick click launches the app (empty slots do nothing on a
+// click — they require a long-press); a long-press opens the picker to add /
+// change / clear the slot; a right-click jumps to the slotted app's settings.
 slotBtns.forEach((btn) => {
   const index = Number(btn.dataset.slot);
   let pressTimer = null;
@@ -409,14 +473,15 @@ slotBtns.forEach((btn) => {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (longFired) return; // the long-press already opened the picker
+    // Filled slot: a quick click launches its app. Empty slot: no click action —
+    // it can only be opened with a long-press (see the timer above).
     if (btn.dataset.appId) window.api.send('pet:launch-slot', index);
-    else edit();
   });
   btn.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
     clearTimer();
-    edit();
+    window.api.send('pet:slot-settings', index);
   });
 });
 

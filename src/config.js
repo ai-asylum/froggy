@@ -16,6 +16,11 @@ const DEFAULTS = {
   // Visual size of your own frog (1 = default). Applied to the pet window and
   // the sprite so the whole thing grows/shrinks together.
   scale: 1,
+  // When off, the frog stops charging/squishing (and hopping) as you type.
+  typingSquish: true,
+  // Master switch: when off, every frog freezes to a static pose (no idle bob,
+  // hops, dances, sleep, or squish) — both your frog and friends'.
+  animations: true,
   // Pomodoro app: focus / break lengths in minutes.
   pomodoro: { workMinutes: 25, breakMinutes: 5 },
   // Water reminder app: how often to nudge, and what to say.
@@ -49,6 +54,9 @@ const DEFAULTS = {
   friends: [],
   // Last-known window position for each remote frog, keyed by friend id.
   remotePositions: {},
+  // The room currently joined ('' = none). A frog can only be in one room at a
+  // time; persisted so we rejoin it on the next launch.
+  room: '',
   // Supabase is used only to link peers (signaling + presence). No frog
   // state or messages ever pass through it — those go P2P over WebRTC.
   supabase: { url: '', anonKey: '' },

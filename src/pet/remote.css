@@ -57,9 +57,16 @@ body {
 
 .bubble {
   position: absolute;
-  left: 50%;
-  top: 4px;
-  transform: translateX(-50%) translateY(6px);
+  /* Centered via left/right + auto margins (not left:50%) so the bubble can use
+     the full window width instead of being squeezed into the right half. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  /* Anchor just above the frog's head and grow upward as the text gets longer,
+     so the bubble always hugs the frog instead of floating up in the corner. */
+  bottom: 78px;
+  transform: translateY(6px);
+  width: fit-content;
   max-width: 116px;
   padding: 6px 9px;
   font: 500 11px -apple-system, BlinkMacSystemFont, sans-serif;
@@ -82,7 +89,7 @@ body {
 
 .bubble.visible {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
 }
 
 /* Shout: red-outlined, all caps, no close button (auto-hides). */

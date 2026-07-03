@@ -22,16 +22,9 @@
           </label>
 
           <label class="field row">
-            <span class="lbl">Auto-push notes (git)</span>
-            <input id="autopush" type="checkbox" />
-          </label>
-          <div id="autopush-hint" class="hint"></div>
-
-          <label class="field row">
-            <span class="lbl">Frog launch button</span>
+            <span class="lbl">App slot on frog</span>
             <input id="frogbutton" type="checkbox" />
           </label>
-          <div class="hint">Use the frog itself as an extra app slot — tap it to launch, long-press to assign.</div>
 
           <hr class="sep" />
 
@@ -45,6 +38,10 @@
           </button>
           <button class="nav" data-goto="friends">
             <span>Manage friends</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="rooms">
+            <span>Rooms</span>
             <span class="chev">&rsaquo;</span>
           </button>
         </section>
@@ -76,6 +73,20 @@
               <span id="scaleVal"></span>
             </div>
           </label>
+
+          <hr class="sep" />
+
+          <label class="field row">
+            <span class="lbl">Squish while typing</span>
+            <input id="typingsquish" type="checkbox" />
+          </label>
+          <div class="hint">The frog scrunches and hops as you type. Uncheck to keep it still while you work.</div>
+
+          <label class="field row">
+            <span class="lbl">Animations</span>
+            <input id="animations" type="checkbox" />
+          </label>
+          <div class="hint">Master switch. Uncheck to freeze every frog — yours and friends' — to a static pose.</div>
         </section>
 
         <!-- ========================== FRIENDS =========================== -->
@@ -107,6 +118,29 @@
           <div id="friends" class="list"></div>
         </section>
 
+        <!-- ============================ ROOMS =========================== -->
+        <section class="view" id="view-rooms" hidden>
+          <div id="roomnetstatus" class="netstatus"></div>
+
+          <label class="field" id="roomjoinfield">
+            <span class="lbl">Join a room</span>
+            <div class="addfriend">
+              <input id="roomname" class="text" placeholder="Room name (no password)" />
+              <button id="joinroom">Join</button>
+            </div>
+          </label>
+
+          <label class="field" id="roomcurrentfield" hidden>
+            <span class="lbl">Current room</span>
+            <div class="folder">
+              <span id="roomlabel" class="path"></span>
+              <button id="leaveroom" class="leave">Leave</button>
+            </div>
+          </label>
+
+          <div id="roommembers" class="list"></div>
+        </section>
+
         <!-- ==================== MICRO JOURNAL (app) ===================== -->
         <section class="view" id="view-app-journal" hidden>
           <label class="field">
@@ -116,6 +150,12 @@
               <button id="pick">Change</button>
             </div>
           </label>
+
+          <label class="field row">
+            <span class="lbl">Auto-push notes (git)</span>
+            <input id="autopush" type="checkbox" />
+          </label>
+          <div id="autopush-hint" class="hint"></div>
 
           <label class="field">
             <span class="lbl">Prompt me every</span>

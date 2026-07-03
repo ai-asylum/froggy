@@ -119,6 +119,14 @@ const remoteWins = new Map(); // friendId -> BrowserWindow (a friend's frog)
 const presence = new Map(); // friendId -> boolean (Supabase presence)
 const connected = new Set(); // friendIds with an open P2P data channel
 
+// --- Room state --------------------------------------------------------------
+// A room is a named Supabase presence channel anyone can join (no password).
+// Everyone in it sees everyone else's frog on screen — they are *not* friends
+// (no P2P link, no DMs), just present. One room at a time.
+let currentRoom = ''; // the joined room name ('' = none)
+const roomMembers = new Map(); // memberId -> { name, color } (excluding self)
+const roomFrogIds = new Set(); // frogs on screen because of the room, not a friendship
+
 let lastHopAt = 0;
 let currentDisplayId = null;
 let hourlyTimer = null;
@@ -382,6 +390,9 @@ function nag() {
 }
 
 function startAttention() {
+  // Unpinned journal stays quiet — no scheduled hop/nag cycle. (An explicit
+  // preview from Settings calls nag() directly and still works.)
+  if (!isAppPinned('journal')) return;
   attentionActive = true;
   sleeping = false; // an attention jump wakes the frog
   nag();
@@ -577,6 +588,12 @@ function startNetworking() {
   signaling.publishProfile(cfg.color);
   syncFriendSkins();
 
+  // Rejoin the room we were in last session.
+  if (cfg.room) {
+    currentRoom = cfg.room;
+    signaling.joinRoom(cfg.room, { name: selfName(), color: cfg.color }, onRoomSync);
+  }
+
   // Invite broadcasts are ephemeral, so a request sent while the other frog was
   // offline (or before Supabase was configured) never arrived. Re-send any still
   // pending outgoing invites once we're connected.
@@ -603,6 +620,7 @@ function handleIncomingRequest(fromId, fromName) {
     config.save({ friends });
     signaling.sendAccept(fromId, selfName());
     signaling.addPair(fromId);
+    roomFrogIds.delete(fromId); // their frog is now owned by the friendship
     spawnRemoteFrog(fromId);
     danceLocal();
     notify('Friend added', `${existing.label || fromName || 'Your friend'} — say hi!`);
@@ -634,6 +652,7 @@ function handleFriendAccepted(fromId, fromName) {
   if ((!existing.label || existing.label === 'Friend') && fromName) existing.label = fromName;
   config.save({ friends });
   signaling.addPair(fromId);
+  roomFrogIds.delete(fromId); // their frog is now owned by the friendship
   spawnRemoteFrog(fromId);
   notify('Friend added', `${existing.label || 'Your friend'} accepted — say hi!`);
   pushFriends();
@@ -647,6 +666,7 @@ function handleFriendRemoved(fromId) {
   despawnRemoteFrog(fromId);
   presence.delete(fromId);
   connected.delete(fromId);
+  respawnAsRoomFrog(fromId);
   pushFriends();
 }
 
@@ -659,7 +679,16 @@ function removeFriendLocally(id) {
   despawnRemoteFrog(id);
   presence.delete(id);
   connected.delete(id);
+  respawnAsRoomFrog(id);
   pushFriends();
+}
+
+// An ex-friend who shares my room keeps their (plain, room-owned) frog.
+function respawnAsRoomFrog(id) {
+  const m = roomMembers.get(id);
+  if (!m) return;
+  roomFrogIds.add(id);
+  spawnRemoteFrog(id, { label: m.name, color: m.color, online: true });
 }
 
 // Pull friends' stored skins from Supabase and apply them to their frog windows
@@ -675,6 +704,90 @@ async function syncFriendSkins() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Rooms
+// ---------------------------------------------------------------------------
+function isAcceptedFriend(id) {
+  const cfg = config.load();
+  return (cfg.friends || []).some((f) => f.id === id && f.status === 'accepted');
+}
+
+// Push the room snapshot to any open friends UI.
+function pushRoom() {
+  const payload = {
+    room: currentRoom,
+    members: [...roomMembers.entries()].map(([id, m]) => ({ id, ...m }))
+  };
+  if (friendsWin) friendsWin.webContents.send('room:changed', payload);
+  if (settingsWin) settingsWin.webContents.send('room:changed', payload);
+}
+
+// Presence sync from the room channel: diff against what we knew — spawn a frog
+// for each newcomer, drop the ones who left. Friends' frogs are left alone
+// (they're owned by the friendship lifecycle, not the room).
+function onRoomSync(members) {
+  const cfg = config.load();
+  const next = new Map();
+  for (const m of members || []) {
+    if (!m.id || m.id === cfg.selfId) continue;
+    next.set(m.id, { name: m.name || 'Froggy', color: m.color || '' });
+  }
+
+  for (const id of [...roomMembers.keys()]) {
+    if (next.has(id)) continue;
+    roomMembers.delete(id);
+    if (roomFrogIds.has(id)) {
+      roomFrogIds.delete(id);
+      if (!isAcceptedFriend(id)) despawnRemoteFrog(id);
+    }
+  }
+
+  for (const [id, m] of next) {
+    const known = roomMembers.get(id);
+    roomMembers.set(id, m);
+    if (!known) {
+      // A friend already has a frog on screen; only spawn for strangers.
+      if (!remoteWins.has(id)) {
+        roomFrogIds.add(id);
+        spawnRemoteFrog(id, { label: m.name, color: m.color, online: true });
+      }
+    } else if (roomFrogIds.has(id) && m.color && m.color !== known.color) {
+      const w = remoteWins.get(id);
+      if (w && !w.isDestroyed()) w.webContents.send('peer:event', { type: 'color', color: m.color });
+    }
+  }
+
+  pushRoom();
+}
+
+function joinRoomLocal(name) {
+  const cfg = config.load();
+  if (!signaling.isConfigured(cfg)) {
+    return { ok: false, error: 'Connect to Supabase first (Connection setup)' };
+  }
+  const room = String(name || '').trim().toLowerCase();
+  if (!room) return { ok: false, error: 'Enter a room name' };
+  if (room === currentRoom) return { ok: true, room };
+  if (currentRoom) leaveRoomLocal({ silent: true }); // one room at a time
+  currentRoom = room;
+  config.save({ room });
+  signaling.joinRoom(room, { name: selfName(), color: cfg.color }, onRoomSync);
+  pushRoom();
+  return { ok: true, room };
+}
+
+function leaveRoomLocal(opts = {}) {
+  signaling.leaveRoom();
+  for (const id of [...roomFrogIds]) {
+    if (!isAcceptedFriend(id)) despawnRemoteFrog(id);
+  }
+  roomFrogIds.clear();
+  roomMembers.clear();
+  currentRoom = '';
+  config.save({ room: '' });
+  if (!opts.silent) pushRoom();
+}
+
 function restartNetworking() {
   try {
     signaling.stop();
@@ -682,6 +795,9 @@ function restartNetworking() {
   for (const id of [...remoteWins.keys()]) despawnRemoteFrog(id);
   presence.clear();
   connected.clear();
+  roomFrogIds.clear();
+  roomMembers.clear();
+  currentRoom = '';
   if (netWin) {
     netWin.close();
     netWin = null;
@@ -698,10 +814,12 @@ function clampToWorkArea(x, y, w, h) {
   };
 }
 
-function spawnRemoteFrog(friendId) {
+// `opts` lets room members (who aren't friends, so have no config entry) supply
+// their label/color from presence data, and spawn facing forward right away.
+function spawnRemoteFrog(friendId, opts = {}) {
   if (remoteWins.has(friendId)) return remoteWins.get(friendId);
   const cfg = config.load();
-  const label = friendLabel(friendId);
+  const label = opts.label || friendLabel(friendId);
 
   const saved = (cfg.remotePositions || {})[friendId];
   let x;
@@ -744,12 +862,23 @@ function spawnRemoteFrog(friendId) {
   win.setIgnoreMouseEvents(true, { forward: true });
   win.setOpacity(typeof cfg.opacity === 'number' ? cfg.opacity : 1);
   win.loadFile(path.join(__dirname, 'pet', 'remote.html'), {
-    query: { id: friendId, label, color: friendColor(friendId) || '', scale: String(petScale) }
+    query: {
+      id: friendId,
+      label,
+      color: opts.color || friendColor(friendId) || '',
+      scale: String(petScale)
+    }
   });
   win.webContents.on('did-finish-load', () => {
-    if (!win.isDestroyed()) win.webContents.send('peer:presence', { online: connected.has(friendId) });
+    if (win.isDestroyed()) return;
+    win.webContents.send('anim:enabled', { on: config.load().animations !== false });
+    win.webContents.send('peer:presence', { online: !!opts.online || connected.has(friendId) });
   });
-  win.on('closed', () => remoteWins.delete(friendId));
+  // Only forget this window if the map still points at it — a despawn followed
+  // by an immediate respawn (friend -> room frog) must not lose the new window.
+  win.on('closed', () => {
+    if (remoteWins.get(friendId) === win) remoteWins.delete(friendId);
+  });
   remoteWins.set(friendId, win);
   return win;
 }
@@ -824,13 +953,15 @@ function openNameWindow() {
     return;
   }
   const W = 300;
-  const H = 190;
+  const H = 246;
   const area = screen.getPrimaryDisplay().workArea;
+  const nx = Math.round(area.x + (area.width - W) / 2);
+  const ny = Math.round(area.y + (area.height - H) / 2);
   nameWin = new BrowserWindow({
     width: W,
     height: H,
-    x: Math.round(area.x + (area.width - W) / 2),
-    y: Math.round(area.y + (area.height - H) / 2),
+    x: nx,
+    y: ny,
     frame: false,
     transparent: true,
     resizable: false,
@@ -844,9 +975,57 @@ function openNameWindow() {
     }
   });
   nameWin.setAlwaysOnTop(true, 'screen-saver');
-  nameWin.loadFile(path.join(__dirname, 'name', 'index.html'));
+  nameWin.loadFile(path.join(__dirname, 'name', 'index.html'), {
+    query: { color: String(config.load().color || 'green') }
+  });
   nameWin.on('closed', () => {
     nameWin = null;
+    // Naming aborted/finished: hand the frog back to the user.
+    unlockPetFromNaming();
+  });
+
+  // Perch the real (transparent) frog on top of the naming card as a live
+  // preview — centered on the card with its feet resting on the top edge — and
+  // freeze it so it can't be dragged or clicked until naming is done.
+  if (petWin) {
+    const feetFromTop = PET_H - PET_BOTTOM_PAD;
+    petWin.setBounds({
+      x: Math.round(nx + (W - PET_W) / 2),
+      y: Math.round(ny - feetFromTop),
+      width: PET_W,
+      height: PET_H
+    });
+    sendPetLock(true);
+    petWin.moveTop();
+  }
+}
+
+// Freeze/unfreeze the frog. On first launch the pet renderer may still be
+// loading when we ask to lock it, so a plain send would be dropped — wait for
+// did-finish-load in that case so the lock actually lands.
+function sendPetLock(on) {
+  if (!petWin) return;
+  const wc = petWin.webContents;
+  if (wc.isLoading()) {
+    wc.once('did-finish-load', () => {
+      if (petWin) petWin.webContents.send('pet:lock', on);
+    });
+  } else {
+    wc.send('pet:lock', on);
+  }
+}
+
+// Return the frog to its normal home (top-right) and re-enable interaction once
+// the first-run naming step is over.
+function unlockPetFromNaming() {
+  if (!petWin) return;
+  sendPetLock(false);
+  const wa = screen.getPrimaryDisplay().workArea;
+  petWin.setBounds({
+    x: wa.x + wa.width - PET_W - MARGIN,
+    y: wa.y + MARGIN,
+    width: PET_W,
+    height: PET_H
   });
 }
 
@@ -960,6 +1139,26 @@ function launchApp(id) {
   const fn = APP_LAUNCHERS[id];
   if (fn) fn();
   else openSettingsWindow('apps'); // unknown/uninstalled: fall back to the list
+}
+
+// An app is "pinned" when it occupies one of the frog's slots. Only pinned apps
+// are allowed to nudge you (OS notifications + frog nags); an app you've taken
+// off the frog stays quiet.
+function isAppPinned(id) {
+  return (config.load().slots || []).includes(id);
+}
+
+// Halt an app's background activity the instant it leaves the frog, so a running
+// timer or a pending nag doesn't linger after you unpin it.
+function stopApp(id) {
+  if (id === 'pomodoro') {
+    pomodoro.stop();
+    clearFrogNotification('pomodoro');
+  } else if (id === 'countdown') {
+    countdown.stop(); // pushes a cleared state that hides the on-frog timer overlay
+  } else if (id === 'journal') {
+    stopAttention();
+  }
 }
 
 // The slot picker popover — a small transient window anchored under the frog,
@@ -1159,6 +1358,7 @@ const pomodoro = createPomodoro({
   },
   onComplete: (finishedPhase) => {
     markActivity();
+    if (!isAppPinned('pomodoro')) return; // unpinned: finish quietly, no alert
     if (finishedPhase === 'focus') {
       notify('Pomodoro', 'Focus done — tap the frog to start your break.');
     } else {
@@ -1179,9 +1379,17 @@ function togglePomodoro() {
 // ---------------------------------------------------------------------------
 // Water reminder app
 // ---------------------------------------------------------------------------
+function waterColor() {
+  const app = apps.get('water');
+  return (app && app.color) || '#38bdf8';
+}
+
 function fireWaterReminder(message) {
+  if (!isAppPinned('water')) return; // unpinned: no reminders
   notify('Drink water', message);
   danceLocal();
+  // Float the reminder text above the frog (auto-hides), matching the timer.
+  showFrogMessage({ text: message, label: 'Water', color: waterColor() });
   // Tapping the frog acknowledges it — restart the countdown from now.
   notifyOnFrog('water', () => {
     waterReminder.reschedule();
@@ -1199,12 +1407,11 @@ const waterReminder = createReminder({
 // ---------------------------------------------------------------------------
 // A one-shot timer. Clicking the Countdown slot starts it and floats a live
 // readout above the frog (sharing the Pomodoro overlay); clicking again cancels
-// it. When it reaches zero, a small dialog — tinted with the app's color — pops
-// above the frog with your message. Duration + message are set in Settings.
-let countdownAlertWin = null;
+// it. When it reaches zero, your message floats above the frog — tinted with
+// the app's color — and auto-hides. Duration + message are set in Settings.
 
 // The Countdown app's accent, taken from the app registry so the overlay and
-// the end dialog match its catalog color.
+// the end message match its catalog color.
 function countdownColor() {
   const app = apps.get('countdown');
   return (app && app.color) || '#8b5cf6';
@@ -1214,11 +1421,18 @@ function pushCountdown(state) {
   if (petWin) petWin.webContents.send('countdown:state', state);
 }
 
+// Float a short reminder message just above the frog (in the same readout as
+// the timer), tinted with the app's accent. Auto-hides in the pet renderer.
+function showFrogMessage({ text, label, color } = {}) {
+  if (petWin) petWin.webContents.send('frog:message', { text: String(text || ''), label: label || '', color: color || '' });
+}
+
 function fireCountdownDone(message, color) {
   markActivity();
+  if (!isAppPinned('countdown')) return; // unpinned: end quietly, no message
   notify('Countdown', message);
   frogAlert();
-  openCountdownAlert(message, color);
+  showFrogMessage({ text: message, label: 'Countdown', color });
 }
 
 const countdown = createCountdown({
@@ -1230,53 +1444,6 @@ const countdown = createCountdown({
 function toggleCountdown() {
   markActivity();
   countdown.toggle(); // start()/stop() each emit a tick, refreshing the overlay
-}
-
-// The end-of-countdown message, popped as a bubble dialog above the frog
-// (mirroring the shout composer's placement). Read-only; closes on dismiss.
-function openCountdownAlert(message, color) {
-  if (countdownAlertWin) {
-    countdownAlertWin.close();
-    countdownAlertWin = null;
-  }
-  const W = 300;
-  const H = 160;
-  const b = petUrl();
-  const area = b
-    ? screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea
-    : screen.getPrimaryDisplay().workArea;
-  let x = area.x + area.width - W - MARGIN;
-  let y = area.y + MARGIN;
-  if (b) {
-    x = Math.min(Math.max(b.x + b.width / 2 - W / 2, area.x), area.x + area.width - W);
-    y = b.y - H + 24;
-    if (y < area.y) y = b.y + b.height - PET_BOTTOM_PAD - 10; // flip below if no room above
-  }
-  countdownAlertWin = new BrowserWindow({
-    width: W,
-    height: H,
-    x: Math.round(x),
-    y: Math.round(y),
-    frame: false,
-    transparent: true,
-    resizable: false,
-    hasShadow: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  countdownAlertWin.setAlwaysOnTop(true, 'screen-saver');
-  countdownAlertWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
-  countdownAlertWin.loadFile(path.join(__dirname, 'apps', 'countdown', 'index.html'), {
-    query: { message: String(message || ''), color: String(color || '') }
-  });
-  countdownAlertWin.on('closed', () => {
-    countdownAlertWin = null;
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,16 +1515,18 @@ function registerIpc() {
     }
     // (A waiting journal nag is handled above via the notification system —
     // it registers as a pending notification whose tap opens the composer.)
-    // Otherwise the frog is itself a slot (the 4th): launch the app assigned to
-    // it, or open the picker so you can assign one. When the frog button is
-    // disabled, a tap falls back to opening the journal composer instead.
+    // Otherwise the frog is itself a slot (the 4th): a tap launches the app
+    // assigned to it. When the frog button is disabled, a tap falls back to
+    // opening the journal composer instead.
     if (cfg.frogButton === false) {
       openInputWindow();
       return;
     }
     const frogApp = (cfg.slots || [])[FROG_SLOT];
     if (frogApp) launchApp(frogApp);
-    else openSlotPicker(FROG_SLOT);
+    // Empty frog slot: a tap does nothing on purpose. The picker is opened by
+    // *holding* the frog (long-press -> pet:edit-slot), mirroring the empty arc
+    // slots so the gesture is consistent everywhere.
   });
   ipcMain.on('pet:open-settings', () => openSettingsWindow());
   ipcMain.on('pet:open-apps', () => openSettingsWindow('apps'));
@@ -1373,11 +1542,21 @@ function registerIpc() {
     if (id) launchApp(id);
     else openSlotPicker(index);
   });
-  // Long-press / right-click -> always open the picker to change/clear. The
-  // frog slot (index 3) is only editable while the frog button is enabled.
+  // Long-press -> open the picker to change/clear. The frog slot (index 3) is
+  // only editable while the frog button is enabled.
   ipcMain.on('pet:edit-slot', (_e, index) => {
     if (index === FROG_SLOT && config.load().frogButton === false) return;
     openSlotPicker(index);
+  });
+  // Right-click -> jump straight to the slotted app's settings. An empty slot
+  // (or an app without a settings screen) falls back to the picker so you can
+  // still add / change the app.
+  ipcMain.on('pet:slot-settings', (_e, index) => {
+    if (index === FROG_SLOT && config.load().frogButton === false) return;
+    const id = (config.load().slots || [])[index];
+    const app = id ? apps.get(id) : null;
+    if (app && app.settingsView) openSettingsWindow(`app-${app.settingsView}`);
+    else openSlotPicker(index);
   });
 
   // The picker asks for the current slots + app catalog to render itself.
@@ -1390,13 +1569,18 @@ function registerIpc() {
   // Assign (or clear, when appId is null) a slot. An app can only live in one
   // slot, so if it's already elsewhere we move it. The frog re-renders live.
   ipcMain.handle('slots:set', (_e, { index, appId }) => {
-    const slots = [...(config.load().slots || [null, null, null, null])];
+    const before = config.load().slots || [null, null, null, null];
+    const slots = [...before];
     while (slots.length < 4) slots.push(null); // 3 arc slots + the frog itself
     if (appId) {
       for (let i = 0; i < slots.length; i++) if (slots[i] === appId) slots[i] = null;
     }
     slots[index] = appId || null;
     const next = config.save({ slots });
+    // Anything that just came off the frog goes quiet immediately.
+    for (const id of before) {
+      if (id && !slots.includes(id)) stopApp(id);
+    }
     if (petWin) petWin.webContents.send('config:updated', next);
     return next.slots;
   });
@@ -1486,7 +1670,14 @@ function registerIpc() {
     if (Object.prototype.hasOwnProperty.call(p, 'scale')) applyPetScale(next.scale);
     if (Object.prototype.hasOwnProperty.call(p, 'water')) waterReminder.reschedule();
     // Share your new skin so friends' copies of your frog update, even offline.
-    if (Object.prototype.hasOwnProperty.call(p, 'color')) signaling.publishProfile(next.color);
+    if (Object.prototype.hasOwnProperty.call(p, 'color')) {
+      signaling.publishProfile(next.color);
+      signaling.updateRoomProfile({ color: next.color });
+    }
+    // Roommates see your name via presence — keep it fresh too.
+    if (Object.prototype.hasOwnProperty.call(p, 'displayName')) {
+      signaling.updateRoomProfile({ name: selfName() });
+    }
     // Reconnect the mesh if the signaling backend changed; refresh ICE servers
     // (STUN/TURN) in place if only the relay config changed.
     if (Object.prototype.hasOwnProperty.call(p, 'supabase')) {
@@ -1495,6 +1686,12 @@ function registerIpc() {
       netWin.webContents.send('mesh:config', { iceServers: buildIceServers() });
     }
     if (petWin) petWin.webContents.send('config:updated', next);
+    // Freeze/thaw friends' frogs too when the master animations switch flips.
+    if (Object.prototype.hasOwnProperty.call(p, 'animations')) {
+      for (const w of remoteWins.values()) {
+        w.webContents.send('anim:enabled', { on: next.animations !== false });
+      }
+    }
     return next;
   });
 
@@ -1579,12 +1776,36 @@ function registerIpc() {
     if (connected.has(id)) openMessageWindow(id);
   });
   // The X on a friend's frog breaks the link (and removes you from theirs).
-  ipcMain.on('remote:remove', (_e, { id }) => removeFriendLocally(id));
+  // On a room-only frog it just hides the window locally — they stay in the
+  // room (and in the members list) and reappear next time they rejoin.
+  ipcMain.on('remote:remove', (_e, { id }) => {
+    if (roomFrogIds.has(id) && !isAcceptedFriend(id)) {
+      roomFrogIds.delete(id);
+      despawnRemoteFrog(id);
+      return;
+    }
+    removeFriendLocally(id);
+  });
 
-  // First-run: save the frog's name.
-  ipcMain.on('name:save', (_e, name) => {
+  // First-run: save the frog's name (and the color chosen in the same window).
+  ipcMain.on('name:save', (_e, payload) => {
+    const name = typeof payload === 'string' ? payload : payload && payload.name;
+    const color = payload && payload.color;
     const n = String(name || '').trim();
-    if (n) config.save({ displayName: n });
+    const patch = {};
+    if (n) patch.displayName = n;
+    if (color) patch.color = color;
+    if (Object.keys(patch).length) {
+      const next = config.save(patch);
+      if (petWin) petWin.webContents.send('config:updated', next);
+    }
+  });
+
+  // First-run: live-preview a color choice on the perched frog.
+  ipcMain.on('name:color', (_e, color) => {
+    if (!color) return;
+    const next = config.save({ color: String(color) });
+    if (petWin) petWin.webContents.send('config:updated', next);
   });
 
   // Send a chat message to one friend over their data channel.
@@ -1642,6 +1863,7 @@ function registerIpc() {
     config.save({ friends });
     signaling.sendAccept(id, selfName());
     signaling.addPair(id);
+    roomFrogIds.delete(id); // their frog (if in the room) is now the friendship's
     pushFriends();
     return { ok: true };
   });
@@ -1655,6 +1877,17 @@ function registerIpc() {
   // Remove a friend / cancel a request (mutual).
   ipcMain.handle('friends:remove', (_e, { id }) => {
     removeFriendLocally(id);
+    return { ok: true };
+  });
+
+  // --- Rooms ---------------------------------------------------------------
+  ipcMain.handle('room:status', () => ({
+    room: currentRoom,
+    members: [...roomMembers.entries()].map(([id, m]) => ({ id, ...m }))
+  }));
+  ipcMain.handle('room:join', (_e, { name }) => joinRoomLocal(name));
+  ipcMain.handle('room:leave', () => {
+    leaveRoomLocal();
     return { ok: true };
   });
 }

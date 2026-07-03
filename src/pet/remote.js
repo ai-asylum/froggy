@@ -42,6 +42,9 @@ window.api.on('peer:scale', ({ scale }) => applyScale(scale));
 // Online/offline (P2P) — turn the frog's back when it's not connected.
 window.api.on('peer:presence', ({ online }) => engine.setAway(!online));
 
+// Master animations switch — freeze/thaw this friend's frog to a static pose.
+window.api.on('anim:enabled', ({ on }) => engine.setAnimationsEnabled(on));
+
 let bubbleTimer = null;
 function hideBubble() {
   bubble.classList.remove('visible');

@@ -23,6 +23,14 @@
         <div id="timer-hint" class="timer-hint">tap to start break</div>
       </div>
 
+      <!-- End-of-reminder message, floating above the frog in the same readout
+           style as the timer. Used by the Water reminder and the Countdown's
+           "time's up"; pet.js fills it, tints it per-app, and auto-hides it. -->
+      <div id="frogmsg" class="timer msg" aria-hidden="true">
+        <div id="frogmsg-label" class="timer-label"></div>
+        <div id="frogmsg-text" class="timer-msg-text"></div>
+      </div>
+
       <!-- Shared hover label; centered so it never clips the small window. -->
       <div id="tip" aria-hidden="true"></div>
 

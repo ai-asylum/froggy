@@ -80,6 +80,7 @@ function stop() {
   }
   client = null;
   inbox = null;
+  room = null;
 }
 
 // Fire-and-forget a control message into someone else's inbox. We briefly join
@@ -156,6 +157,65 @@ function removePair(friendId) {
   pairs.delete(friendId);
 }
 
+// --- Rooms -------------------------------------------------------------------
+// A room is a shared presence channel (`room:<name>`) anyone can join by name —
+// no password, nothing stored server-side. Everyone in it tracks a tiny profile
+// { id, name, color }; joins and leaves arrive live via presence sync.
+let room = null; // { channel, name, meta }
+
+function roomMemberList() {
+  if (!room) return [];
+  const state = room.channel.presenceState();
+  const out = [];
+  for (const metas of Object.values(state)) {
+    const m = metas && metas[0];
+    if (m && m.id) out.push({ id: m.id, name: m.name || '', color: m.color || '' });
+  }
+  return out;
+}
+
+// Join (or switch to) a room. `onSync` fires with the full member list every
+// time anyone joins or leaves. Only one room at a time — joining leaves the
+// previous one.
+function joinRoom(name, meta, onSync) {
+  if (!client || !name) return false;
+  leaveRoom();
+  const channel = client.channel('room:' + name, {
+    config: { presence: { key: selfId }, broadcast: { self: false } }
+  });
+  room = { channel, name, meta: { id: selfId, ...meta } };
+  const sync = () => onSync && onSync(roomMemberList());
+  channel.on('presence', { event: 'sync' }, sync);
+  channel.on('presence', { event: 'join' }, sync);
+  channel.on('presence', { event: 'leave' }, sync);
+  channel.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED') {
+      try {
+        await channel.track(room.meta);
+      } catch {}
+      sync();
+    }
+  });
+  return true;
+}
+
+function leaveRoom() {
+  if (!room) return;
+  try {
+    if (client) client.removeChannel(room.channel);
+  } catch {}
+  room = null;
+}
+
+// Re-announce the local profile (name/color change) to the current room.
+async function updateRoomProfile(patch) {
+  if (!room) return;
+  room.meta = { ...room.meta, ...patch };
+  try {
+    await room.channel.track(room.meta);
+  } catch {}
+}
+
 // --- Skins (persisted profiles) --------------------------------------------
 // Unlike presence (which vanishes when you go offline), a frog's chosen skin is
 // stored in a small Supabase table so friends see the right color even before
@@ -214,6 +274,9 @@ module.exports = {
   sendAccept,
   sendRemove,
   sendSignal,
+  joinRoom,
+  leaveRoom,
+  updateRoomProfile,
   publishProfile,
   fetchProfiles,
   isConfigured

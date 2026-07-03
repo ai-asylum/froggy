@@ -88,6 +88,18 @@ body {
 .timer.awaiting {
   animation: timer-pulse 1.1s ease-in-out infinite;
 }
+/* Message variant of the readout (Water reminder / Countdown "time's up"):
+   same floating pill, but wraps a short message instead of a clock. */
+.timer.msg {
+  max-width: 156px;
+}
+.timer-msg-text {
+  font: 600 12px/1.25 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
 @keyframes timer-pulse {
   0%,
   100% {
@@ -230,10 +242,46 @@ body {
   --arc-color: rgba(40, 40, 52, 0.7);
 }
 
-/* Held down long enough to open the picker: a subtle press + ring. */
+/* Held down long enough to open the picker: a subtle press + a circular
+   progress ring that fills over the long-press duration. */
 .slot.pressing {
   transform: scale(0.94);
   filter: brightness(0.9);
+}
+
+/* Registered so the conic-gradient angle can be smoothly animated. */
+@property --press {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+/* The ring itself: a conic gradient masked into a thin band around the button,
+   its filled arc growing from 12 o'clock as --press animates 0 -> 1. */
+.slot.pressing::after,
+.petslot.pressing::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from -90deg,
+    rgba(255, 255, 255, 0.96) calc(var(--press) * 1turn),
+    rgba(255, 255, 255, 0.14) 0
+  );
+  -webkit-mask: radial-gradient(circle farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 3.5px));
+  mask: radial-gradient(circle farthest-side, transparent calc(100% - 3.5px), #000 calc(100% - 3.5px));
+  animation: slot-press-fill var(--press-ms, 450ms) linear forwards;
+  pointer-events: none;
+  z-index: 2;
+}
+@keyframes slot-press-fill {
+  from {
+    --press: 0;
+  }
+  to {
+    --press: 1;
+  }
 }
 
 /* The frog's own slot: a small badge riding on its body. Non-interactive — the

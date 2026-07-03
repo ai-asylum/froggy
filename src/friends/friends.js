@@ -4,6 +4,16 @@ const requestsEl = document.getElementById('requests');
 const friendCodeEl = document.getElementById('friendcode');
 const displayNameEl = document.getElementById('displayname');
 const statusEl = document.getElementById('netstatus');
+const roomJoinRow = document.getElementById('roomjoinrow');
+const roomCurrentRow = document.getElementById('roomcurrentrow');
+const roomNameEl = document.getElementById('roomname');
+const roomLabelEl = document.getElementById('roomlabel');
+const roomMembersEl = document.getElementById('roommembers');
+
+// Kept so the room list can show who's already a friend (and re-render when
+// friendships change).
+let lastFriends = [];
+let lastRoom = { room: '', members: [] };
 
 function makeRow(f) {
   const row = document.createElement('div');
@@ -23,7 +33,58 @@ function makeRow(f) {
   return row;
 }
 
+// People in the current room, drawn like friend rows. Everyone here is online
+// by definition (presence). Strangers get an "Add friend" button.
+function renderRoom() {
+  const inRoom = !!lastRoom.room;
+  roomJoinRow.hidden = inRoom;
+  roomCurrentRow.hidden = !inRoom;
+  roomLabelEl.textContent = inRoom ? `In room: ${lastRoom.room}` : '';
+
+  roomMembersEl.innerHTML = '';
+  if (!inRoom) return;
+  const members = lastRoom.members || [];
+  if (!members.length) {
+    const empty = document.createElement('div');
+    empty.className = 'roomempty';
+    empty.textContent = 'Nobody else here yet.';
+    roomMembersEl.appendChild(empty);
+    return;
+  }
+  for (const m of members) {
+    const row = makeRow({ id: m.id, label: m.name });
+    const dot = document.createElement('span');
+    dot.className = 'dot online';
+    row.prepend(dot);
+
+    const f = lastFriends.find((x) => x.id === m.id);
+    if (f && f.status === 'accepted') {
+      const tag = document.createElement('span');
+      tag.className = 'pendtag';
+      tag.textContent = 'friend';
+      row.append(tag);
+    } else if (f) {
+      const tag = document.createElement('span');
+      tag.className = 'pendtag';
+      tag.textContent = f.status === 'pending' ? 'pending' : 'invited you';
+      row.append(tag);
+    } else {
+      const add = document.createElement('button');
+      add.className = 'accept';
+      add.textContent = 'Add friend';
+      add.addEventListener('click', async () => {
+        const res = await window.api.invoke('friends:add', { code: m.id, label: m.name });
+        if (!(res && res.ok)) statusEl.textContent = (res && res.error) || 'Could not send';
+      });
+      row.append(add);
+    }
+    roomMembersEl.appendChild(row);
+  }
+}
+
 function renderAll(friends) {
+  lastFriends = friends;
+  renderRoom(); // friendship changes flip the room rows' buttons/tags
   const incoming = friends.filter((f) => f.status === 'incoming');
   const others = friends.filter((f) => f.status !== 'incoming');
 
@@ -68,6 +129,7 @@ async function load() {
   const { selfId, friends } = await window.api.invoke('friends:list');
   selfCodeEl.textContent = selfId || '(generating...)';
   selfCodeEl.title = selfId || '';
+  lastRoom = (await window.api.invoke('room:status')) || lastRoom;
   renderAll(friends || []);
 
   const cfg = await window.api.invoke('settings:get');
@@ -104,6 +166,28 @@ document.getElementById('addfriend').addEventListener('click', async () => {
 
 displayNameEl.addEventListener('change', async () => {
   await window.api.invoke('settings:set', { displayName: displayNameEl.value.trim() });
+});
+
+document.getElementById('joinroom').addEventListener('click', async () => {
+  const name = roomNameEl.value.trim();
+  if (!name) {
+    roomNameEl.focus();
+    return;
+  }
+  const res = await window.api.invoke('room:join', { name });
+  if (!(res && res.ok)) statusEl.textContent = (res && res.error) || 'Could not join';
+});
+roomNameEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('joinroom').click();
+});
+
+document.getElementById('leaveroom').addEventListener('click', () => {
+  window.api.invoke('room:leave');
+});
+
+window.api.on('room:changed', (payload) => {
+  lastRoom = payload || { room: '', members: [] };
+  renderRoom();
 });
 
 window.api.on('friends:changed', ({ friends }) => renderAll(friends || []));

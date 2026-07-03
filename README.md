@@ -50,6 +50,10 @@ Default destination: `~/.froggy/` (changeable in settings).
 
 Froggy is single-player out of the box. To spawn friends' frogs and send shouts/DMs, it needs Supabase Realtime credentials (URL + anon key) in the app's `config.json` (`supabase.url` / `supabase.anonKey`). Signaling/presence go through Supabase; frog state and messages flow peer-to-peer over WebRTC.
 
+### Rooms
+
+**Settings → Rooms** lets you drop into a shared space by name (no password). Everyone who joins the same room name sees each other's frogs hop around — they're *not* friends (no P2P link or DMs), just present. Joins and leaves update live via Supabase presence, so a frog appears the moment someone enters and vanishes when they leave. You can be in one room at a time, and the room list lets you fire off a friend request to anyone there. Nothing about rooms is stored server-side — it's a plain presence channel (`room:<name>`), so no extra table is needed.
+
 ### Shared skins
 
 So a friend's frog shows their real color even while they're offline, each frog's chosen skin is stored in a small Supabase table. Create it once in your project's SQL editor:
@@ -121,6 +125,10 @@ src/
     registry.js      The list of installed apps the Applications screen reads
     journal/         The write-an-entry popup (the micro-journal app)
     shout/           Shout-to-everyone composer
+    pomodoro/        Focus / break timer
+    water/           Drink-water reminder
+    countdown/       One-shot countdown timer
+  slots/             The quick-launch slot picker popover
   settings/          Settings hub (Applications / Appearance / Manage friends)
   friends/           Friends panel (invite, accept, online status)
   message/           Speak (direct message) composer
@@ -133,11 +141,29 @@ assets/              The 6 frog spritesheets + tray icon
 ## Apps
 
 Froggy is a tiny desktop platform. Each feature is an **app** that lives in its
-own folder under `src/apps/<id>/` and is listed in `src/apps/registry.js`. The
-frog has **three quick-launch slots** in the arc above it: click a slot to open
-its app, click an empty slot (**+**) to add one, and **long-press** (or
-right-click) a slot to change or clear it. The full list also lives in
-**Settings → Applications**.
+own folder under `src/apps/<id>/` and is listed in `src/apps/registry.js`.
+
+Froggy ships with five apps out of the box:
+
+| App | What it does |
+| --- | --- |
+| **Micro journal** | Hops over to nudge you to jot down what you're up to. Each entry is a dated Markdown note. |
+| **Shout** | Blast an all-caps message to every friend at once. |
+| **Pomodoro** | Focus / break timer that runs in the background. |
+| **Drink water** | A gentle nudge to hydrate on your own schedule. |
+| **Countdown** | A one-shot timer that pops your message when it ends. |
+
+**Quick-launch slots.** The frog has **four quick-launch slots**: three arc
+buttons around it (left / top / right) plus the **frog itself** as a fourth
+slot (shown as a badge on its belly). Click a slot to open its app, click an
+empty slot (**+**) to add one, and **long-press** (or right-click) a slot to
+change or clear it. The full list also lives in **Settings → Applications**.
+You can turn the frog-as-a-button off with the **Frog launch button** setting;
+when off, tapping the frog falls back to opening the journal.
+
+**Notification beacon.** When an app, a friend invite, or a journal reminder
+wants your attention, the frog flashes that app's icon in its center slot —
+tap it to jump straight to what's calling.
 
 To make your own app:
 

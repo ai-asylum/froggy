@@ -1,8 +1,8 @@
 // The slot picker popover. Opened by clicking an empty slot on the frog, or by
-// long-pressing / right-clicking any slot. It lists every installed app so you
-// can drop one into the slot, clear the slot, or jump straight to the settings
-// of the app currently in the slot. Closes on blur (handled in main), and after
-// any choice.
+// long-pressing any slot (right-click jumps straight to the slotted app's
+// settings). It lists every installed app so you can drop one into the slot,
+// clear the slot, or jump straight to the settings of the app currently in the
+// slot. Closes on blur (handled in main), and after any choice.
 
 const params = new URLSearchParams(location.search);
 const slotIndex = Number(params.get('index') || 0);

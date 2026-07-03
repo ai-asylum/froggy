@@ -38,6 +38,19 @@
 
         <div id="requests" class="list"></div>
         <div id="friends" class="list"></div>
+
+        <label class="field" id="roomfield">
+          <span class="lbl">Room</span>
+          <div class="addfriend" id="roomjoinrow">
+            <input id="roomname" class="text" placeholder="Room name (no password)" />
+            <button id="joinroom">Join</button>
+          </div>
+          <div class="folder" id="roomcurrentrow" hidden>
+            <span id="roomlabel" class="path"></span>
+            <button id="leaveroom" class="leave">Leave</button>
+          </div>
+        </label>
+        <div id="roommembers" class="list"></div>
       </div>
     </div>
     <script src="friends.js"></script>

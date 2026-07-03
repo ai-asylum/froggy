@@ -173,6 +173,17 @@ function createEngine(canvas, opts = {}) {
   let lastKeyAt = 0;
   let pulseAt = -1e9;
 
+  // User preferences. `animationsOn` is a master switch (freezes to a static
+  // pose); `typingSquishOn` gates only the keystroke charge/squish reaction.
+  let animationsOn = true;
+  let typingSquishOn = true;
+  function setAnimationsEnabled(on) {
+    animationsOn = on !== false;
+  }
+  function setTypingSquish(on) {
+    typingSquishOn = on !== false;
+  }
+
   function chargeRatio() {
     return Math.min(charge, MAX_CHARGE) / MAX_CHARGE;
   }
@@ -183,8 +194,11 @@ function createEngine(canvas, opts = {}) {
   }
 
   // --- Public: local drivers ----------------------------------------------
-  // A key was pressed: (re)enter charge mode and top up the meter.
+  // A key was pressed: (re)enter charge mode and top up the meter. Skipped when
+  // typing-squish is off (or animations are disabled) so the frog stays calm as
+  // you type — and nothing is broadcast to friends either.
   function onKey() {
+    if (!animationsOn || !typingSquishOn) return;
     mode = 'charge';
     charge = Math.min(charge + 1, MAX_CHARGE);
     const now = performance.now();
@@ -209,13 +223,22 @@ function createEngine(canvas, opts = {}) {
   function celebrate() {
     launchJump(20);
   }
-  // A playful little dance: a few quick hops in a row.
+  // A playful little dance: four quick hops in a row. Any in-progress dance is
+  // cancelled first so overlapping calls don't stack into double-speed hopping.
+  let danceTimer = null;
   function dance() {
+    if (danceTimer) {
+      clearTimeout(danceTimer);
+      danceTimer = null;
+    }
     let n = 0;
     const hop = () => {
-      if (n++ >= 4) return;
+      if (n++ >= 4) {
+        danceTimer = null;
+        return;
+      }
       launchJump(16);
-      setTimeout(hop, 240);
+      danceTimer = setTimeout(hop, 240);
     };
     hop();
   }
@@ -342,6 +365,14 @@ function createEngine(canvas, opts = {}) {
   }
 
   function tick(now) {
+    // Master switch off: hold a single static pose (still turned away if
+    // offline) and skip every animated branch below.
+    if (!animationsOn) {
+      drawFrame(mode === 'away' ? AWAY_FRAME : 0, 0, 0);
+      requestAnimationFrame(tick);
+      return;
+    }
+
     if (mode === 'away') {
       // Turned away, faint, gently breathing — offline / no P2P.
       const t = (now - awayStart) / 1000;
@@ -416,6 +447,8 @@ function createEngine(canvas, opts = {}) {
     setColor,
     setAway,
     setScale,
+    setAnimationsEnabled,
+    setTypingSquish,
     applyRemote,
     overFrog,
     getColor: () => currentColor

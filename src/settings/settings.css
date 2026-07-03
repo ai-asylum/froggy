@@ -8,6 +8,13 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/* The `hidden` attribute must win over class rules that set a display (e.g.
+   .folder/.addfriend use display:flex, which would otherwise keep a hidden
+   row visible — the same reason .nav[hidden] exists below). */
+[hidden] {
+  display: none !important;
+}
+
 #card {
   box-sizing: border-box;
   margin: 8px;
@@ -383,6 +390,21 @@ button.danger:hover {
 
 #friends:empty::after {
   content: 'No friends yet.';
+  font-size: 11px;
+  opacity: 0.45;
+}
+
+#roomcurrentfield .leave {
+  background: transparent;
+  border: 1px solid rgba(255, 140, 140, 0.4);
+  color: rgba(255, 140, 140, 0.85);
+}
+#roomcurrentfield .leave:hover {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+
+.roomempty {
   font-size: 11px;
   opacity: 0.45;
 }

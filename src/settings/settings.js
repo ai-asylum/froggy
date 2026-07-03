@@ -19,6 +19,8 @@ const autoEl = document.getElementById('autolaunch');
 const autoPushEl = document.getElementById('autopush');
 const autoPushHintEl = document.getElementById('autopush-hint');
 const frogButtonEl = document.getElementById('frogbutton');
+const typingSquishEl = document.getElementById('typingsquish');
+const animationsEl = document.getElementById('animations');
 const statusEl = document.getElementById('status');
 
 let state = {};
@@ -35,6 +37,7 @@ const TITLES = {
   apps: 'Applications',
   appearance: 'Appearance',
   friends: 'Manage friends',
+  rooms: 'Rooms',
   'app-journal': 'Micro journal',
   'app-shout': 'Shout',
   'app-pomodoro': 'Pomodoro',
@@ -55,6 +58,7 @@ function showView(name, { push = true } = {}) {
   document.getElementById('scroll').scrollTop = 0;
   if (name === 'apps') loadApps();
   if (name === 'friends') loadFriends();
+  if (name === 'rooms') loadRoom();
   if (name === 'app-pomodoro') loadPomodoro();
   if (name === 'app-countdown') loadCountdown();
   if (name === 'app-water') loadWater();
@@ -161,6 +165,9 @@ async function load() {
 
   autoEl.checked = !!state.autoLaunch;
   frogButtonEl.checked = state.frogButton !== false;
+  typingSquishEl.checked = state.typingSquish !== false;
+  animationsEl.checked = state.animations !== false;
+  typingSquishEl.disabled = state.animations === false;
   renderColors();
   refreshAutoPush();
 }
@@ -216,6 +223,18 @@ frogButtonEl.addEventListener('change', async () => {
   flash('Saved');
 });
 
+typingSquishEl.addEventListener('change', async () => {
+  state = await window.api.invoke('settings:set', { typingSquish: typingSquishEl.checked });
+  flash('Saved');
+});
+
+animationsEl.addEventListener('change', async () => {
+  state = await window.api.invoke('settings:set', { animations: animationsEl.checked });
+  // Typing-squish is a no-op while all animations are off; reflect that.
+  typingSquishEl.disabled = !animationsEl.checked;
+  flash('Saved');
+});
+
 document.getElementById('test').addEventListener('click', () => {
   window.api.send('pet:test-jump');
 });
@@ -236,6 +255,17 @@ const requestsEl = document.getElementById('requests');
 const friendCodeEl = document.getElementById('friendcode');
 const displayNameEl = document.getElementById('displayname');
 const netStatusEl = document.getElementById('netstatus');
+const roomNetStatusEl = document.getElementById('roomnetstatus');
+const roomJoinField = document.getElementById('roomjoinfield');
+const roomCurrentField = document.getElementById('roomcurrentfield');
+const roomNameEl = document.getElementById('roomname');
+const roomLabelEl = document.getElementById('roomlabel');
+const roomMembersEl = document.getElementById('roommembers');
+
+// Kept so the room list can show who's already a friend (and re-render when
+// friendships change).
+let lastFriends = [];
+let lastRoom = { room: '', members: [] };
 
 function makeFriendRow(f) {
   const row = document.createElement('div');
@@ -255,7 +285,57 @@ function makeFriendRow(f) {
   return row;
 }
 
+// People in the current room, drawn like friend rows. Everyone here is online
+// by definition (presence). Strangers get an "Add friend" button.
+function renderRoom() {
+  const inRoom = !!lastRoom.room;
+  roomJoinField.hidden = inRoom;
+  roomCurrentField.hidden = !inRoom;
+  roomLabelEl.textContent = inRoom ? lastRoom.room : '';
+
+  roomMembersEl.innerHTML = '';
+  if (!inRoom) return;
+  const members = lastRoom.members || [];
+  if (!members.length) {
+    const empty = document.createElement('div');
+    empty.className = 'roomempty';
+    empty.textContent = 'Nobody else here yet.';
+    roomMembersEl.appendChild(empty);
+    return;
+  }
+  for (const m of members) {
+    const row = makeFriendRow({ id: m.id, label: m.name });
+    const dot = document.createElement('span');
+    dot.className = 'dot online';
+    row.prepend(dot);
+
+    const f = lastFriends.find((x) => x.id === m.id);
+    if (f && f.status === 'accepted') {
+      const tag = document.createElement('span');
+      tag.className = 'pendtag';
+      tag.textContent = 'friend';
+      row.append(tag);
+    } else if (f) {
+      const tag = document.createElement('span');
+      tag.className = 'pendtag';
+      tag.textContent = f.status === 'pending' ? 'pending' : 'invited you';
+      row.append(tag);
+    } else {
+      const add = document.createElement('button');
+      add.className = 'accept';
+      add.textContent = 'Add friend';
+      add.addEventListener('click', async () => {
+        const res = await window.api.invoke('friends:add', { code: m.id, label: m.name });
+        flash(res && res.ok ? 'Invite sent' : (res && res.error) || 'Could not send');
+      });
+      row.append(add);
+    }
+    roomMembersEl.appendChild(row);
+  }
+}
+
 function renderFriends(friends) {
+  lastFriends = friends; // the Rooms view reads this to tag/hide "Add friend"
   const incoming = friends.filter((f) => f.status === 'incoming');
   const others = friends.filter((f) => f.status !== 'incoming');
 
@@ -313,6 +393,24 @@ async function loadFriends() {
   }
 }
 
+async function loadRoom() {
+  // Freshen the friends list too so member rows can tag known friends / hide the
+  // "Add friend" button (the friends view may not have been opened yet).
+  const { friends } = await window.api.invoke('friends:list');
+  lastFriends = friends || lastFriends;
+  lastRoom = (await window.api.invoke('room:status')) || lastRoom;
+  renderRoom();
+
+  const s = await window.api.invoke('net:status');
+  if (s && s.configured) {
+    roomNetStatusEl.textContent = 'Connected. Join any room by name to see who else is there.';
+    roomNetStatusEl.className = 'netstatus on';
+  } else {
+    roomNetStatusEl.textContent = 'Offline: set up the connection first to join rooms.';
+    roomNetStatusEl.className = 'netstatus off';
+  }
+}
+
 document.getElementById('copycode').addEventListener('click', async () => {
   const code = selfCodeEl.textContent.trim();
   if (!code) return;
@@ -343,7 +441,32 @@ displayNameEl.addEventListener('change', async () => {
   state = await window.api.invoke('settings:set', { displayName: displayNameEl.value.trim() });
 });
 
-window.api.on('friends:changed', ({ friends }) => renderFriends(friends || []));
+document.getElementById('joinroom').addEventListener('click', async () => {
+  const name = roomNameEl.value.trim();
+  if (!name) {
+    roomNameEl.focus();
+    return;
+  }
+  const res = await window.api.invoke('room:join', { name });
+  flash(res && res.ok ? `Joined ${res.room}` : (res && res.error) || 'Could not join');
+});
+roomNameEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('joinroom').click();
+});
+
+document.getElementById('leaveroom').addEventListener('click', () => {
+  window.api.invoke('room:leave');
+});
+
+window.api.on('room:changed', (payload) => {
+  lastRoom = payload || { room: '', members: [] };
+  renderRoom();
+});
+
+window.api.on('friends:changed', ({ friends }) => {
+  renderFriends(friends || []);
+  renderRoom(); // a new friendship flips a room member's tag/button
+});
 window.api.on('friends:presence', ({ id, online }) => {
   const dot = friendsEl.querySelector(`.friend[data-id="${CSS.escape(id)}"] .dot`);
   if (dot) dot.classList.toggle('online', !!online);
