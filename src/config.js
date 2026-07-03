@@ -13,6 +13,20 @@ const DEFAULTS = {
   color: 'green',
   intervalMinutes: 60,
   opacity: 1,
+  // Visual size of your own frog (1 = default). Applied to the pet window and
+  // the sprite so the whole thing grows/shrinks together.
+  scale: 1,
+  // Pomodoro app: focus / break lengths in minutes.
+  pomodoro: { workMinutes: 25, breakMinutes: 5 },
+  // Water reminder app: how often to nudge, and what to say.
+  water: { intervalMinutes: 60, message: 'Time to drink some water!' },
+  // Countdown app: a one-shot timer length + the message shown when it ends.
+  countdown: { minutes: 10, message: 'Time\u2019s up!' },
+  // Quick-launch slots. The first three are the arc buttons around the frog
+  // (left / top / right); the fourth is the frog itself, shown as a badge on its
+  // body. Each entry is an app id (from src/apps/registry.js) or null for an
+  // empty "+" slot.
+  slots: [null, 'journal', 'shout', null],
   // Position is stored so the frog reappears where you left it.
   position: null,
   // Author handle written into note frontmatter.

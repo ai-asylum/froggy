@@ -1,0 +1,69 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Tinted with the Countdown app color via --accent (set by alert.js). Mirrors
+   the shout composer card, but read-only: it just announces the message. */
+#card {
+  --accent: #8b5cf6;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100vh;
+  padding: 14px;
+  background: rgba(24, 22, 32, 0.97);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#title {
+  font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+#message {
+  flex: 1;
+  overflow-y: auto;
+  font: 700 17px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #fff;
+  word-break: break-word;
+}
+
+#row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spacer {
+  flex: 1;
+}
+
+button {
+  font: 700 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: 0.04em;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 18px;
+  cursor: pointer;
+}
+.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.primary:hover {
+  filter: brightness(1.08);
+}
+.primary:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}

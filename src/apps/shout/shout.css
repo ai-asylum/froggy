@@ -76,3 +76,12 @@ button {
   opacity: 0.5;
   cursor: default;
 }
+
+.ghost {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+}
+.ghost:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}

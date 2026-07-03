@@ -8,95 +8,188 @@
   <body>
     <div id="card">
       <div id="header">
-        <span>Froggy settings</span>
+        <button id="back" class="x" aria-label="Back" hidden>&lsaquo; Back</button>
+        <span id="title">Froggy settings</span>
         <button id="close" class="x" aria-label="Close">x</button>
       </div>
 
       <div id="scroll">
-      <label class="field">
-        <span class="lbl">Save notes to</span>
-        <div class="folder">
-          <span id="dest" class="path"></span>
-          <button id="pick">Change</button>
-        </div>
-      </label>
+        <!-- ============================ MAIN ============================ -->
+        <section class="view" id="view-main">
+          <label class="field row">
+            <span class="lbl">Launch at login</span>
+            <input id="autolaunch" type="checkbox" />
+          </label>
 
-      <label class="field">
-        <span class="lbl">Frog color</span>
-        <div id="colors" class="colors"></div>
-      </label>
+          <label class="field row">
+            <span class="lbl">Auto-push notes (git)</span>
+            <input id="autopush" type="checkbox" />
+          </label>
+          <div id="autopush-hint" class="hint"></div>
 
-      <label class="field">
-        <span class="lbl">Transparency</span>
-        <div class="interval">
-          <input id="opacity" type="range" min="0.2" max="1" step="0.05" />
-          <span id="opacityVal"></span>
-        </div>
-      </label>
+          <hr class="sep" />
 
-      <label class="field">
-        <span class="lbl">Prompt me every</span>
-        <div class="interval">
-          <input id="interval" type="number" min="1" max="720" step="1" />
-          <span>minutes</span>
-          <button id="test" class="ghost">Test jump</button>
-        </div>
-      </label>
+          <button class="nav accent" data-goto="apps" hidden>
+            <span>Applications</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="appearance">
+            <span>Appearance</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="friends">
+            <span>Manage friends</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+        </section>
 
-      <label class="field row">
-        <span class="lbl">Launch at login</span>
-        <input id="autolaunch" type="checkbox" />
-      </label>
+        <!-- ======================== APPLICATIONS ======================== -->
+        <section class="view" id="view-apps" hidden>
+          <div id="appgrid" class="appgrid"></div>
+        </section>
 
-      <label class="field row">
-        <span class="lbl">Auto-push notes (git)</span>
-        <input id="autopush" type="checkbox" />
-      </label>
-      <div id="autopush-hint" class="hint"></div>
+        <!-- ========================= APPEARANCE ========================= -->
+        <section class="view" id="view-appearance" hidden>
+          <label class="field">
+            <span class="lbl">Frog skin</span>
+            <div id="colors" class="colors"></div>
+          </label>
 
-      <hr class="sep" />
-      <div class="section-title">Multiplayer</div>
-      <div id="netstatus" class="netstatus"></div>
+          <label class="field">
+            <span class="lbl">Transparency</span>
+            <div class="interval">
+              <input id="opacity" type="range" min="0.2" max="1" step="0.05" />
+              <span id="opacityVal"></span>
+            </div>
+          </label>
 
-      <label class="field">
-        <span class="lbl">Your friend code</span>
-        <div class="folder">
-          <span id="selfcode" class="path"></span>
-          <button id="copycode">Copy</button>
-        </div>
-      </label>
+          <label class="field">
+            <span class="lbl">Size</span>
+            <div class="interval">
+              <input id="scale" type="range" min="0.6" max="1.8" step="0.1" />
+              <span id="scaleVal"></span>
+            </div>
+          </label>
+        </section>
 
-      <label class="field">
-        <span class="lbl">Invite a friend</span>
-        <div class="addfriend">
-          <input id="friendcode" class="text" placeholder="Their code (ABCD-1234)" />
-          <button id="addfriend">Send invite</button>
-        </div>
-      </label>
+        <!-- ========================== FRIENDS =========================== -->
+        <section class="view" id="view-friends" hidden>
+          <div id="netstatus" class="netstatus"></div>
 
-      <details id="advanced">
-        <summary>Connection setup</summary>
-        <label class="field">
-          <span class="lbl">Supabase URL</span>
-          <input id="sb-url" class="text" placeholder="https://xxxx.supabase.co" />
-        </label>
-        <label class="field">
-          <span class="lbl">Supabase anon key</span>
-          <input id="sb-key" class="text" placeholder="eyJ..." />
-        </label>
-        <label class="field">
-          <span class="lbl">TURN URL (optional)</span>
-          <input id="turn-url" class="text" placeholder="turn:host:3478" />
-        </label>
-        <label class="field">
-          <span class="lbl">TURN user / credential (optional)</span>
-          <div class="addfriend">
-            <input id="turn-user" class="text" placeholder="user" />
-            <input id="turn-cred" class="text" placeholder="credential" />
-          </div>
-        </label>
-        <button id="save-conn">Save connection</button>
-      </details>
+          <label class="field">
+            <span class="lbl">Your name</span>
+            <input id="displayname" class="text" placeholder="How friends see you" />
+          </label>
+
+          <label class="field">
+            <span class="lbl">Your friend code</span>
+            <div class="folder">
+              <span id="selfcode" class="path"></span>
+              <button id="copycode">Copy</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span class="lbl">Invite a friend</span>
+            <div class="addfriend">
+              <input id="friendcode" class="text" placeholder="Their code (ABCD-1234)" />
+              <button id="addfriend">Send</button>
+            </div>
+          </label>
+
+          <div id="requests" class="list"></div>
+          <div id="friends" class="list"></div>
+        </section>
+
+        <!-- ==================== MICRO JOURNAL (app) ===================== -->
+        <section class="view" id="view-app-journal" hidden>
+          <label class="field">
+            <span class="lbl">Save notes to</span>
+            <div class="folder">
+              <span id="dest" class="path"></span>
+              <button id="pick">Change</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span class="lbl">Prompt me every</span>
+            <div class="interval">
+              <input id="interval" type="number" min="1" max="720" step="1" />
+              <span>minutes</span>
+              <button id="test" class="ghost">Test jump</button>
+            </div>
+          </label>
+        </section>
+
+        <!-- ======================= SHOUT (app) ========================== -->
+        <section class="view" id="view-app-shout" hidden>
+          <p class="appblurb">Shout sends an all-caps message to every connected friend at once. Open it from the megaphone button on your frog.</p>
+          <p class="appblurb muted">This app has no settings.</p>
+        </section>
+
+        <!-- ====================== POMODORO (app) ======================== -->
+        <section class="view" id="view-app-pomodoro" hidden>
+          <p class="hint">
+            Click the Pomodoro frog button to start a focus block — the
+            countdown floats above the frog. When it runs out the frog hops;
+            tap it to start your break, and tap again to focus. Click the
+            Pomodoro button any time to stop.
+          </p>
+
+          <label class="field">
+            <span class="lbl">Focus length</span>
+            <div class="interval">
+              <input id="pomo-work" type="number" min="1" max="180" step="1" />
+              <span>minutes</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span class="lbl">Break length</span>
+            <div class="interval">
+              <input id="pomo-break" type="number" min="1" max="60" step="1" />
+              <span>minutes</span>
+            </div>
+          </label>
+        </section>
+
+        <!-- ====================== COUNTDOWN (app) ======================= -->
+        <section class="view" id="view-app-countdown" hidden>
+          <p class="hint">
+            Click the Countdown frog button to start the timer — it floats above
+            the frog. When it reaches zero, your message pops up in a dialog.
+            Click the button again to cancel.
+          </p>
+
+          <label class="field">
+            <span class="lbl">Duration</span>
+            <div class="interval">
+              <input id="countdown-minutes" type="number" min="1" max="600" step="1" />
+              <span>minutes</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span class="lbl">Message when it ends</span>
+            <input id="countdown-message" class="text" placeholder="Time&rsquo;s up!" />
+          </label>
+        </section>
+
+        <!-- ==================== DRINK WATER (app) ======================= -->
+        <section class="view" id="view-app-water" hidden>
+          <label class="field">
+            <span class="lbl">Remind me every</span>
+            <div class="interval">
+              <input id="water-interval" type="number" min="1" max="720" step="1" />
+              <span>minutes</span>
+            </div>
+          </label>
+
+          <label class="field">
+            <span class="lbl">Reminder message</span>
+            <input id="water-message" class="text" placeholder="Time to drink some water!" />
+          </label>
+        </section>
       </div>
 
       <div id="footer">

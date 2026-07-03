@@ -1,0 +1,134 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+#card {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100vh;
+  padding: 10px;
+  background: rgba(28, 33, 30, 0.97);
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#title {
+  font: 600 11px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #cfe8d8;
+  padding: 2px 4px 6px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+/* An app choice, or one of the muted utility rows below the list. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #f2f7f4;
+  font: 500 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.row.selected {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.appicon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.appicon svg {
+  display: block;
+}
+
+.appmeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.appname {
+  font-weight: 600;
+}
+
+.apptag {
+  font: 400 10px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* Small badge on apps already living in another slot. */
+.onfrog {
+  flex: 0 0 auto;
+  font: 600 9px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #8fd6a8;
+  background: rgba(95, 184, 95, 0.16);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.check {
+  flex: 0 0 auto;
+  color: #8fd6a8;
+  font-size: 13px;
+}
+
+.muted {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 500;
+}
+
+.rowicon {
+  flex: 0 0 auto;
+  width: 28px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1;
+}
+
+hr.sep {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}

@@ -6,14 +6,15 @@
 const canvas = document.getElementById('frog');
 const gear = document.getElementById('gear');
 const quit = document.getElementById('quit');
-const friendBtn = document.getElementById('friend');
-const journalBtn = document.getElementById('journal');
-const shoutBtn = document.getElementById('shout');
-const buttons = [friendBtn, journalBtn, shoutBtn, gear, quit];
+const slotBtns = Array.from(document.querySelectorAll('.slot'));
+const buttons = [...slotBtns, gear, quit];
 
 // Local beats are streamed to main, which relays them to connected peers.
 const engine = window.createFrogEngine(canvas, {
   remote: false,
+  // Extra transparent space below the frog (matches the taller pet window) so
+  // the sprite keeps its on-screen spot but never touches the window edge.
+  bottomMargin: 46,
   onEvent: (msg) => window.api.send('net:local-event', msg)
 });
 
@@ -28,11 +29,173 @@ window.api.on('attention:stop', () => {});
 window.api.on('entry:saved', () => engine.celebrate());
 window.api.on('config:updated', (cfg) => {
   if (cfg && cfg.color) engine.setColor(cfg.color);
+  if (cfg && typeof cfg.scale === 'number') applyScale(cfg.scale);
+  if (cfg && Array.isArray(cfg.slots)) renderSlots(cfg.slots);
+});
+// While an app is notifying (or a friend invite / journal nag is waiting), hide
+// the frog's slot badge so the notifier has priority — a tap goes to it, not the
+// slot's app.
+window.api.on('frog:notify', (on) => {
+  if (petSlotEl) petSlotEl.classList.toggle('hushed', !!on);
 });
 
-// Pick up the configured color on launch (silent: don't broadcast on boot).
+// --- Shared timer overlay (Pomodoro + Countdown) ---------------------------
+// A live timer floats just above the frog while either app is running. Each
+// app streams its state; we normalize both into a common "view" and show one at
+// a time (a running Countdown takes precedence over Pomodoro, then reveals it
+// again when it ends). main drives all updates over their :state broadcasts.
+const timerEl = document.getElementById('timer');
+const timerLabelEl = document.getElementById('timer-label');
+const timerTimeEl = document.getElementById('timer-time');
+const timerHintEl = document.getElementById('timer-hint');
+
+function fmtClock(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+}
+
+let pomoView = { active: false };
+let countdownView = { active: false };
+
+function applyOverlay() {
+  const view = countdownView.active ? countdownView : pomoView;
+  if (!view.active) {
+    timerEl.classList.remove('visible', 'awaiting');
+    timerEl.style.removeProperty('--timer-accent');
+    return;
+  }
+  timerEl.classList.add('visible');
+  timerEl.classList.toggle('awaiting', !!view.awaiting);
+  timerLabelEl.textContent = view.label || '';
+  timerTimeEl.textContent = view.time || '';
+  timerHintEl.textContent = view.hint || '';
+  timerEl.style.setProperty('--timer-accent', view.accent || 'rgba(255,255,255,0.82)');
+}
+
+// Pomodoro state -> overlay view. Warm accent for focus, cool for break; a
+// finished phase becomes an "awaiting" tap prompt.
+function toPomoView(st) {
+  if (!st || !st.active) return { active: false };
+  const upcoming = st.awaiting ? st.next || 'focus' : st.phase;
+  const accent = upcoming === 'break' ? '#b9e6ff' : '#ffd7b0';
+  if (st.awaiting) {
+    return {
+      active: true,
+      awaiting: true,
+      accent,
+      label: st.phase === 'focus' ? 'Focus done' : 'Break over',
+      time: fmtClock(0),
+      hint: upcoming === 'break' ? 'tap to start break' : 'tap to focus'
+    };
+  }
+  return {
+    active: true,
+    accent,
+    label: st.phase === 'break' ? 'Break' : 'Focus',
+    time: fmtClock(st.remaining)
+  };
+}
+
+// Countdown state -> overlay view. Tinted with the app's own color.
+function toCountdownView(st) {
+  if (!st || !st.active) return { active: false };
+  return {
+    active: true,
+    accent: st.color || '#8b5cf6',
+    label: st.label || 'Countdown',
+    time: fmtClock(st.remaining)
+  };
+}
+
+window.api.on('pomodoro:state', (st) => {
+  pomoView = toPomoView(st);
+  applyOverlay();
+});
+window.api.on('countdown:state', (st) => {
+  countdownView = toCountdownView(st);
+  applyOverlay();
+});
+window.api.invoke('pomodoro:get').then((st) => {
+  pomoView = toPomoView(st);
+  applyOverlay();
+});
+window.api.invoke('countdown:get').then((st) => {
+  countdownView = toCountdownView(st);
+  applyOverlay();
+});
+
+// --- App slots -------------------------------------------------------------
+// The three arc buttons + the frog itself (the 4th slot) are filled from
+// config.slots. We fetch the app catalog (id -> name/color/icon) once, then
+// render whatever ids are configured.
+const appsById = new Map();
+const FROG_SLOT = 3; // slots[0..2] are the arc buttons; slots[3] is the frog
+const petSlotEl = document.getElementById('petslot');
+const LONG_PRESS_MS = 450; // hold this long to open a slot's picker
+
+const PLUS_SVG =
+  '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>';
+
+function renderSlots(slots) {
+  slotBtns.forEach((btn, i) => {
+    const app = appsById.get((slots || [])[i]);
+    if (app) {
+      btn.classList.remove('empty');
+      btn.style.setProperty('--arc-color', app.color || 'rgba(30,30,40,0.82)');
+      btn.dataset.tip = app.name;
+      btn.dataset.appId = app.id;
+      btn.title = app.name;
+      btn.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">${app.icon || ''}</svg>`;
+    } else {
+      btn.classList.add('empty');
+      btn.style.removeProperty('--arc-color');
+      btn.dataset.tip = 'Add app';
+      delete btn.dataset.appId;
+      btn.title = 'Add app';
+      btn.innerHTML = PLUS_SVG;
+    }
+  });
+  renderPetSlot(appsById.get((slots || [])[FROG_SLOT]));
+}
+
+// The frog's own badge (slot 3). Icon when assigned, faint dashed "+" when not.
+function renderPetSlot(app) {
+  if (!petSlotEl) return;
+  if (app) {
+    petSlotEl.classList.remove('empty');
+    petSlotEl.style.setProperty('--arc-color', app.color || 'rgba(30,30,40,0.82)');
+    petSlotEl.dataset.appId = app.id;
+    petSlotEl.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">${app.icon || ''}</svg>`;
+  } else {
+    petSlotEl.classList.add('empty');
+    petSlotEl.style.removeProperty('--arc-color');
+    delete petSlotEl.dataset.appId;
+    petSlotEl.innerHTML = PLUS_SVG;
+  }
+}
+
+Promise.all([window.api.invoke('apps:list'), window.api.invoke('settings:get')]).then(
+  ([list, cfg]) => {
+    for (const app of list || []) appsById.set(app.id, app);
+    renderSlots((cfg && cfg.slots) || []);
+  }
+);
+
+// Grow/shrink the whole stage (frog + action buttons) with a CSS transform.
+// The pet window is resized to match by main; the engine only needs the factor
+// to keep pixel-perfect hit testing accurate.
+function applyScale(scale) {
+  const s = Number(scale) > 0 ? Number(scale) : 1;
+  document.documentElement.style.setProperty('--scale', String(s));
+  engine.setScale(s);
+}
+
+// Pick up the configured color + scale on launch (silent: don't broadcast).
 window.api.invoke('settings:get').then((cfg) => {
   if (cfg && cfg.color) engine.setColor(cfg.color, { silent: true });
+  if (cfg && typeof cfg.scale === 'number') applyScale(cfg.scale);
 });
 
 // --- Pixel-perfect click-through ------------------------------------------
@@ -75,11 +238,25 @@ function releaseGear() {
   }, 600);
 }
 
+// The frog is itself a slot: holding it opens its picker (like long-pressing an
+// arc slot). Tracked here so a drag or a quick release cancels it.
+let frogPressTimer = null;
+function clearFrogPress() {
+  if (frogPressTimer) {
+    clearTimeout(frogPressTimer);
+    frogPressTimer = null;
+  }
+  if (petSlotEl) petSlotEl.classList.remove('pressing');
+}
+
 window.addEventListener('mousemove', (e) => {
   if (down) {
     const dx = e.screenX - down.screenX;
     const dy = e.screenY - down.screenY;
-    if (!down.moved && Math.hypot(dx, dy) > 4) down.moved = true;
+    if (!down.moved && Math.hypot(dx, dy) > 4) {
+      down.moved = true;
+      clearFrogPress(); // it's a drag, not a long-press
+    }
     if (down.moved) {
       window.api.send('pet:move', { x: down.winX + dx, y: down.winY + dy });
     }
@@ -114,6 +291,7 @@ window.addEventListener('blur', () => {
 });
 
 window.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return; // only the left button drags / taps the frog
   if (buttons.some((b) => b === e.target || b.contains(e.target))) return;
   if (!engine.overFrog(e.clientX, e.clientY)) return;
   down = {
@@ -123,9 +301,18 @@ window.addEventListener('mousedown', (e) => {
     winY: window.screenY,
     moved: false
   };
+  if (petSlotEl) petSlotEl.classList.add('pressing');
+  frogPressTimer = setTimeout(() => {
+    frogPressTimer = null;
+    if (!down || down.moved) return;
+    down = null; // consumed by the long-press: no drag / click follows
+    if (petSlotEl) petSlotEl.classList.remove('pressing');
+    window.api.send('pet:edit-slot', FROG_SLOT);
+  }, LONG_PRESS_MS);
 });
 
 window.addEventListener('mouseup', () => {
+  clearFrogPress();
   if (!down) return;
   const wasDrag = down.moved;
   down = null;
@@ -136,18 +323,65 @@ window.addEventListener('mouseup', () => {
   }
 });
 
-friendBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  window.api.send('pet:open-friends');
+// The frog is just another button: a quick click launches its app (or hands the
+// tap to a notifying app / journal nag), while a right-click or long-press opens
+// its picker to change or clear the app — mirroring the arc slots. Slots handle
+// their own right-click, so we only act when the cursor is over the frog itself.
+window.addEventListener('contextmenu', (e) => {
+  if (buttons.some((b) => b === e.target || b.contains(e.target))) return;
+  if (!engine.overFrog(e.clientX, e.clientY)) return;
+  e.preventDefault();
+  clearFrogPress();
+  window.api.send('pet:edit-slot', FROG_SLOT);
 });
-journalBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  window.api.send('pet:open-journal');
+
+// Slot gestures: a quick click launches the app (or opens the picker for an
+// empty slot); a long-press or right-click always opens the picker so you can
+// change or clear the slot.
+slotBtns.forEach((btn) => {
+  const index = Number(btn.dataset.slot);
+  let pressTimer = null;
+  let longFired = false;
+
+  function edit() {
+    window.api.send('pet:edit-slot', index);
+  }
+  function clearTimer() {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+    btn.classList.remove('pressing');
+  }
+
+  btn.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    longFired = false;
+    btn.classList.add('pressing');
+    pressTimer = setTimeout(() => {
+      longFired = true;
+      btn.classList.remove('pressing');
+      edit();
+    }, LONG_PRESS_MS);
+  });
+  btn.addEventListener('mouseup', clearTimer);
+  btn.addEventListener('mouseleave', clearTimer);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (longFired) return; // the long-press already opened the picker
+    if (btn.dataset.appId) window.api.send('pet:launch-slot', index);
+    else edit();
+  });
+  btn.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimer();
+    edit();
+  });
 });
-shoutBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  window.api.send('pet:open-shout');
-});
+
 gear.addEventListener('click', (e) => {
   e.stopPropagation();
   window.api.send('pet:open-settings');
@@ -156,4 +390,22 @@ quit.addEventListener('click', (e) => {
   e.stopPropagation();
   window.api.send('app:quit');
 });
-buttons.forEach((b) => b.addEventListener('mouseenter', () => keepGear()));
+// Hover labels: reuse a single centered tip so long text never clips the window.
+const tip = document.getElementById('tip');
+const petButtons = new Set([gear, quit]);
+function showTip(btn) {
+  tip.textContent = btn.dataset.tip || '';
+  tip.classList.toggle('up', petButtons.has(btn));
+  tip.classList.add('visible');
+}
+function hideTip() {
+  tip.classList.remove('visible');
+}
+
+buttons.forEach((b) => {
+  b.addEventListener('mouseenter', () => {
+    keepGear();
+    showTip(b);
+  });
+  b.addEventListener('mouseleave', hideTip);
+});

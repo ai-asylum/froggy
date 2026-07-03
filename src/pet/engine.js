@@ -16,13 +16,25 @@ function createEngine(canvas, opts = {}) {
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = false;
 
+  // The stage is scaled with a CSS transform, so pointer coordinates arrive in
+  // scaled (client) pixels while the canvas backing store stays at its base
+  // size. Dividing by this maps them back for pixel-perfect hit testing.
+  let hitScale = Number(opts.scale) > 0 ? Number(opts.scale) : 1;
+  function setScale(s) {
+    if (Number(s) > 0) hitScale = Number(s);
+  }
+
   // Sprite sheet geometry: 4 columns x 9 rows of 16x16 frames.
   const FRAME = 16;
   const COLS = 4;
   const SCALE = 4;
   const DRAW = FRAME * SCALE; // 64px
+  // Transparent gap below the frog's feet. The local pet window keeps extra
+  // headroom here so the sprite never sits against the window edge (where the
+  // spawn/rescale artifact shows); remote frogs keep the tight default.
+  const BOTTOM_MARGIN = typeof opts.bottomMargin === 'number' ? opts.bottomMargin : 6;
   const REST_X = Math.round((canvas.width - DRAW) / 2); // centered horizontally
-  const REST_Y = canvas.height - DRAW - 6; // baseline near the bottom
+  const REST_Y = canvas.height - DRAW - BOTTOM_MARGIN; // baseline near the bottom
 
   const ANIMATIONS = {
     idle: {
@@ -306,7 +318,7 @@ function createEngine(canvas, opts = {}) {
     ctx.globalAlpha = 1;
   }
 
-  function drawZs(now) {
+  function drawZs(now, start) {
     const originX = REST_X + DRAW * 0.72;
     const originY = REST_Y + 6;
     const period = 2600;
@@ -314,7 +326,7 @@ function createEngine(canvas, opts = {}) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < 3; i++) {
-      const ph = (((now - sleepStart) + (i * period) / 3) % period) / period;
+      const ph = (((now - start) + (i * period) / 3) % period) / period;
       const x = originX + Math.sin(ph * Math.PI * 2) * 4 + i * 3;
       const y = originY - ph * 26;
       const size = 6 + i * 2 + ph * 4;
@@ -335,6 +347,7 @@ function createEngine(canvas, opts = {}) {
       const t = (now - awayStart) / 1000;
       const breathe = 0.05 * (0.5 + 0.5 * Math.sin(t * 1.2));
       drawFrame(AWAY_FRAME, 0, breathe, 0.85);
+      drawZs(now, awayStart);
       requestAnimationFrame(tick);
       return;
     }
@@ -343,7 +356,7 @@ function createEngine(canvas, opts = {}) {
       const t = (now - sleepStart) / 1000;
       const breathe = 0.07 * (0.5 + 0.5 * Math.sin(t * 1.5));
       drawFrame(SLEEP_FRAME, 0, breathe);
-      drawZs(now);
+      drawZs(now, sleepStart);
       requestAnimationFrame(tick);
       return;
     }
@@ -378,11 +391,14 @@ function createEngine(canvas, opts = {}) {
   }
   requestAnimationFrame(tick);
 
-  // Pixel-perfect hit test against the currently painted frame.
+  // Pixel-perfect hit test against the currently painted frame. Incoming
+  // coordinates are in scaled client pixels; map them back to canvas pixels.
   function overFrog(x, y) {
-    if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return false;
+    const cx = x / hitScale;
+    const cy = y / hitScale;
+    if (cx < 0 || cy < 0 || cx >= canvas.width || cy >= canvas.height) return false;
     try {
-      const a = ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data[3];
+      const a = ctx.getImageData(Math.floor(cx), Math.floor(cy), 1, 1).data[3];
       return a > 8;
     } catch {
       return false;
@@ -399,6 +415,7 @@ function createEngine(canvas, opts = {}) {
     idle,
     setColor,
     setAway,
+    setScale,
     applyRemote,
     overFrog,
     getColor: () => currentColor

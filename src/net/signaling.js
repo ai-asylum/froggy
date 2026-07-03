@@ -156,6 +156,44 @@ function removePair(friendId) {
   pairs.delete(friendId);
 }
 
+// --- Skins (persisted profiles) --------------------------------------------
+// Unlike presence (which vanishes when you go offline), a frog's chosen skin is
+// stored in a small Supabase table so friends see the right color even before
+// you next come online. Requires a `froggy_profiles` table — see README. Both
+// calls fail quietly if the table/permissions aren't set up.
+const PROFILE_TABLE = 'froggy_profiles';
+
+async function publishProfile(color) {
+  if (!client || !selfId || !color) return;
+  try {
+    const { error } = await client
+      .from(PROFILE_TABLE)
+      .upsert({ id: selfId, color, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  } catch (err) {
+    console.warn('Could not publish skin to Supabase:', err.message);
+  }
+}
+
+// Look up the stored skin color for a set of friend ids -> { id: color }.
+async function fetchProfiles(ids) {
+  const out = {};
+  if (!client || !Array.isArray(ids) || !ids.length) return out;
+  try {
+    const { data, error } = await client
+      .from(PROFILE_TABLE)
+      .select('id,color')
+      .in('id', ids);
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row && row.id && row.color) out[row.id] = row.color;
+    }
+  } catch (err) {
+    console.warn('Could not fetch friend skins from Supabase:', err.message);
+  }
+  return out;
+}
+
 // Send a WebRTC handshake message (offer/answer/ice) to an accepted friend.
 function sendSignal(friendId, kind, data) {
   const entry = pairs.get(friendId);
@@ -176,5 +214,7 @@ module.exports = {
   sendAccept,
   sendRemove,
   sendSignal,
+  publishProfile,
+  fetchProfiles,
   isConfigured
 };

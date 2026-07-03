@@ -4,17 +4,21 @@ body {
   padding: 0;
   background: transparent;
   overflow: hidden;
-  width: 120px;
-  height: 176px;
+  width: 100%;
+  height: 100%;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
+/* Base (scale = 1) footprint; the window is resized to 120*scale x 176*scale by
+   main, and the transform grows the whole stage to fill it. */
 #stage {
   position: relative;
   width: 120px;
   height: 176px;
+  transform: scale(var(--scale, 1));
+  transform-origin: top left;
 }
 
 /* The frog sits at the bottom; the top 64px is headroom for the bubble. */
@@ -112,28 +116,38 @@ body {
   display: inline-block;
 }
 
+/* Bottom-right corner, sitting over the frog's body so there's no dead gap
+   between the frog and the button as the cursor moves toward it. Kept in the
+   layout at all times (hidden via opacity) so its geometry stays hit-testable. */
 .closebtn {
   position: absolute;
-  right: 6px;
-  top: 66px;
-  width: 16px;
-  height: 16px;
-  display: none;
+  right: 4px;
+  bottom: 4px;
+  width: 18px;
+  height: 18px;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: none;
   border-radius: 50%;
   color: #fff;
-  background: rgba(206, 54, 54, 0.9);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  background: rgba(206, 54, 54, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   cursor: pointer;
+  /* The frog canvas is last in the DOM; lift the button above it so it isn't
+     hidden behind the frog's body in the corner. */
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
 }
 .closebtn:hover {
   background: rgba(226, 42, 42, 1);
 }
 .closebtn.visible {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .bubble::after {

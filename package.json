@@ -9,10 +9,77 @@
     "start": "electron .",
     "studio": "node tools/serve.js",
     "test:a": "electron . --user-data-dir=/tmp/froggy-a",
-    "test:b": "electron . --user-data-dir=/tmp/froggy-b"
+    "test:b": "electron . --user-data-dir=/tmp/froggy-b",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "release": "electron-builder --publish always"
+  },
+  "build": {
+    "appId": "com.aiasylum.froggy",
+    "productName": "Froggy",
+    "copyright": "Copyright © ruben.gres",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "!**/*.map"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "ai-asylum",
+      "repo": "froggy"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Froggy ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",

@@ -23,6 +23,7 @@ function send() {
 }
 
 sendBtn.addEventListener('click', send);
+document.getElementById('skip').addEventListener('click', () => window.close());
 entry.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();

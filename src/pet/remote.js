@@ -5,6 +5,7 @@
 const params = new URLSearchParams(location.search);
 const friendId = params.get('id') || '';
 const friendLabel = params.get('label') || 'Friend';
+const friendColor = params.get('color') || 'green';
 
 const canvas = document.getElementById('frog');
 const bubble = document.getElementById('bubble');
@@ -14,14 +15,29 @@ const nametag = document.getElementById('nametag');
 const closeBtn = document.getElementById('close');
 nametag.textContent = friendLabel;
 
-const engine = window.createFrogEngine(canvas, { remote: true });
-// Always have a sprite to draw; real color arrives via a peer event.
-engine.setColor('green', { silent: true });
+const initialScale = Number(params.get('scale')) > 0 ? Number(params.get('scale')) : 1;
+const engine = window.createFrogEngine(canvas, { remote: true, scale: initialScale });
+
+// Grow/shrink the whole frog with the shared `scale` setting (the window is
+// resized to match by main; the engine needs the factor for hit testing).
+function applyScale(scale) {
+  const s = Number(scale) > 0 ? Number(scale) : 1;
+  document.documentElement.style.setProperty('--scale', String(s));
+  engine.setScale(s);
+}
+applyScale(initialScale);
+
+// Show the friend's last-known skin right away (falls back to green for a brand
+// new friend); the live color still arrives via a peer event once connected.
+engine.setColor(friendColor, { silent: true });
 // Start turned away until we learn the peer is actually connected.
 engine.setAway(true);
 
 // Beats from the peer (color, key, hop, jump, sleep, wake, idle).
 window.api.on('peer:event', (msg) => engine.applyRemote(msg));
+
+// The shared size setting changed.
+window.api.on('peer:scale', ({ scale }) => applyScale(scale));
 
 // Online/offline (P2P) — turn the frog's back when it's not connected.
 window.api.on('peer:presence', ({ online }) => engine.setAway(!online));
@@ -60,10 +76,12 @@ function toCanvas(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
+// Geometry-based (works even while the button is faded out) so the corner acts
+// as a hot zone that can re-reveal the controls once they've hidden.
 function overClose(x, y) {
-  if (!closeBtn.classList.contains('visible')) return false;
-  const pad = 6;
   const r = closeBtn.getBoundingClientRect();
+  if (!r.width) return false;
+  const pad = 8;
   return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
 }
 
@@ -86,6 +104,34 @@ function showControls(on) {
   closeBtn.classList.toggle('visible', on);
 }
 
+// Keep the controls up (and the window clickable) with a short grace period so
+// they don't vanish while the cursor crosses from the frog toward the button.
+let hideTimer = null;
+function keepControls() {
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  showControls(true);
+  setInteractive(true);
+}
+function releaseControls() {
+  if (hideTimer) return;
+  hideTimer = setTimeout(() => {
+    hideTimer = null;
+    showControls(false);
+    setInteractive(false);
+  }, 400);
+}
+function hideControlsNow() {
+  if (hideTimer) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  showControls(false);
+  setInteractive(false);
+}
+
 // --- Drag vs click --------------------------------------------------------
 let down = null;
 
@@ -100,31 +146,31 @@ window.addEventListener('mousemove', (e) => {
     return;
   }
   const c = toCanvas(e);
-  const onBubble = overBubble(e.clientX, e.clientY);
-  const hot = engine.overFrog(c.x, c.y) || overClose(e.clientX, e.clientY) || onBubble;
-  showControls(engine.overFrog(c.x, c.y) || overClose(e.clientX, e.clientY));
-  setInteractive(hot);
+  const hot =
+    engine.overFrog(c.x, c.y) || overClose(e.clientX, e.clientY) || overBubble(e.clientX, e.clientY);
+  if (hot) {
+    keepControls();
+  } else if (closeBtn.classList.contains('visible')) {
+    releaseControls();
+  } else {
+    setInteractive(false);
+  }
 });
 
 document.addEventListener('mouseleave', () => {
   if (down) return;
-  showControls(false);
-  setInteractive(false);
+  hideControlsNow();
 });
 window.addEventListener('blur', () => {
   if (down) return;
-  showControls(false);
-  setInteractive(false);
+  hideControlsNow();
 });
 
 closeBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   window.api.send('remote:remove', { id: friendId });
 });
-closeBtn.addEventListener('mouseenter', () => {
-  showControls(true);
-  setInteractive(true);
-});
+closeBtn.addEventListener('mouseenter', keepControls);
 
 window.addEventListener('mousedown', (e) => {
   if (e.target === closeBtn || closeBtn.contains(e.target)) return;

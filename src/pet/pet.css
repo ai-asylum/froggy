@@ -4,17 +4,22 @@ body {
   padding: 0;
   background: transparent;
   overflow: hidden;
-  width: 160px;
-  height: 150px;
+  width: 100%;
+  height: 100%;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }
 
+/* Base (scale = 1) footprint; the window is resized to 160*scale x 190*scale by
+   main, and the transform grows the whole stage — frog and buttons — to fill
+   it. transform-origin keeps everything anchored to the window's top-left. */
 #stage {
   position: relative;
   width: 160px;
-  height: 150px;
+  height: 190px;
+  transform: scale(var(--scale, 1));
+  transform-origin: top left;
 }
 
 #frog {
@@ -23,50 +28,219 @@ body {
   image-rendering: pixelated;
 }
 
+/* Shared timer overlay (Pomodoro + Countdown). Floats on the transparent
+   window just above the frog's head (the sprite baseline sits ~80px down). Kept
+   mostly transparent — a faint pill only for legibility over any wallpaper —
+   and click-through so it never steals a tap meant for the frog. The accent
+   color is provided per-app via --timer-accent. */
+.timer {
+  --timer-accent: rgba(255, 255, 255, 0.82);
+  position: absolute;
+  left: 50%;
+  bottom: 118px; /* just above the frog head, clear of the sprite */
+  transform: translateX(-50%) scale(0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 10px 4px;
+  border-radius: 10px;
+  background: rgba(18, 18, 26, 0.42);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 9;
+}
+.timer.visible {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+.timer-label {
+  font: 700 8px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--timer-accent);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+.timer-time {
+  font: 800 22px/1.05 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.timer-hint {
+  font: 600 8px/1.1 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: rgba(255, 255, 255, 0.72);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.18s ease, opacity 0.18s ease, margin-top 0.18s ease;
+}
+/* When a phase has finished we're waiting for a tap: reveal the hint and give
+   the whole pill a gentle pulse to draw the eye to the frog. */
+.timer.awaiting .timer-hint {
+  max-height: 14px;
+  opacity: 1;
+  margin-top: 1px;
+}
+.timer.awaiting {
+  animation: timer-pulse 1.1s ease-in-out infinite;
+}
+@keyframes timer-pulse {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.08);
+  }
+}
+
+/* Shared hover label. Centered horizontally so long text can't clip against
+   the tiny window edges; vertical spot swaps for the arc vs corner buttons. */
+#tip {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 84px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(20, 20, 28, 0.92);
+  color: #fff;
+  font: 600 10px/1.2 -apple-system, BlinkMacSystemFont, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  z-index: 10;
+}
+#tip.up {
+  top: auto;
+  bottom: 66px;
+}
+#tip.visible {
+  opacity: 1;
+}
+
 /* The three big action buttons, arranged in a semi-circle over the frog. */
 .arcbtn {
+  /* Outline is a lighter tint of each button's own color.
+     Tweak the lighten amount / width to restyle all buttons at once. */
+  --arc-lighten: 45%;
+  --arc-outline: color-mix(in srgb, var(--arc-color) calc(100% - var(--arc-lighten)), #fff);
+  --arc-outline-width: 3px;
+
   position: absolute;
-  width: 30px;
-  height: 30px;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  z-index: 11; /* sit above the pomodoro overlay when shown on hover */
   display: none;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: none;
+  border: var(--arc-outline-width) solid var(--arc-outline);
   border-radius: 50%;
-  font-size: 15px;
   line-height: 1;
   color: #fff;
-  background: rgba(30, 30, 40, 0.82);
+  background: var(--arc-color, rgba(30, 30, 40, 0.82));
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   cursor: pointer;
   transition: transform 0.1s ease, background 0.1s ease;
 }
+.arcbtn svg {
+  display: block;
+}
 .arcbtn:hover {
-  background: rgba(45, 45, 58, 0.96);
+  filter: brightness(1.12);
   transform: scale(1.12);
 }
 .arcbtn.visible {
   display: flex;
 }
 
-#friend {
-  left: 14px;
-  top: 44px;
+/* Three arc positions: left, top-center, right. */
+.slot[data-slot="0"] {
+  left: 9px;
+  top: 39px;
 }
-#journal {
-  left: 65px;
-  top: 15px;
+.slot[data-slot="1"] {
+  left: 60px;
+  top: 10px;
 }
-#shout {
-  left: 116px;
-  top: 44px;
+.slot[data-slot="2"] {
+  left: 111px;
+  top: 39px;
+}
+
+/* An unassigned slot: a faint dashed "+" that invites you to add an app. */
+.slot.empty {
+  --arc-color: rgba(30, 30, 40, 0.5);
+  --arc-outline: rgba(255, 255, 255, 0.5);
+  border-style: dashed;
+  color: rgba(255, 255, 255, 0.75);
+}
+.slot.empty:hover {
+  --arc-color: rgba(40, 40, 52, 0.7);
+}
+
+/* Held down long enough to open the picker: a subtle press + ring. */
+.slot.pressing {
+  transform: scale(0.94);
+  filter: brightness(0.9);
+}
+
+/* The frog's own slot: a small badge riding on its body, always visible so you
+   can see (and get at) the app the frog launches. Non-interactive — the frog
+   beneath it handles the clicks. Sits a touch left-of-centre over the belly;
+   nudge top/left here to reposition on the sprite. */
+.petslot {
+  --arc-lighten: 45%;
+  --arc-outline: color-mix(in srgb, var(--arc-color) calc(100% - var(--arc-lighten)), #fff);
+  position: absolute;
+  box-sizing: border-box;
+  left: 63px;
+  top: 108px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--arc-outline);
+  border-radius: 50%;
+  color: #fff;
+  background: var(--arc-color, rgba(30, 30, 40, 0.82));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 6;
+  transition: transform 0.1s ease, filter 0.1s ease;
+}
+.petslot svg {
+  display: block;
+}
+/* Empty: a faint dashed "+" invite, like an unassigned arc slot. */
+.petslot.empty {
+  --arc-color: rgba(30, 30, 40, 0.5);
+  --arc-outline: rgba(255, 255, 255, 0.5);
+  border-style: dashed;
+  color: rgba(255, 255, 255, 0.7);
+}
+/* Feedback while long-pressing the frog to open its picker. */
+.petslot.pressing {
+  transform: scale(0.92);
+  filter: brightness(0.9);
+}
+/* Hidden while an app is notifying so the notifier takes visual priority. */
+.petslot.hushed {
+  display: none;
 }
 
 /* Small utility buttons (settings / quit) tucked into the bottom corners. */
 .petbtn {
   position: absolute;
-  bottom: 6px;
+  bottom: 46px;
   width: 16px;
   height: 16px;
   display: none;

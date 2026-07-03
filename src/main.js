@@ -15,6 +15,12 @@ const config = require('./config');
 const notes = require('./notes');
 const gitSync = require('./git');
 const signaling = require('./net/signaling');
+const updater = require('./update');
+const apps = require('./apps/registry');
+const { createPomodoro } = require('./apps/pomodoro/pomodoro');
+const { createCountdown } = require('./apps/countdown/countdown');
+const { createReminder } = require('./apps/water/water');
+const { createShout } = require('./apps/shout/shout-main');
 
 const COLORS = ['green', 'orange', 'pink', 'brown', 'rnbw', 'blue'];
 
@@ -38,10 +44,57 @@ function maybeAutoPush(destFolder) {
 }
 
 // Pet window footprint. The sprite is drawn inside this with headroom for jumps
-// and the semi-circle of action buttons above the frog.
-const PET_W = 160;
-const PET_H = 150;
+// and the semi-circle of action buttons above the frog. The window and the
+// sprite scale together by the user's `scale` setting, so these are the base
+// (scale = 1) dimensions; PET_W/PET_H below are the current, scaled ones.
+const BASE_PET_W = 160;
+// Extra transparent headroom below the frog's feet. The sprite keeps its spot
+// (see pet.js `bottomMargin`) but no longer sits against the window edge, which
+// avoids the artifact seen while the window scales in on spawn.
+const PET_BOTTOM_PAD = 40;
+const BASE_PET_H = 150 + PET_BOTTOM_PAD;
 const MARGIN = 24; // gap from screen edge on first launch
+
+// Keep the frog a sensible size on every screen.
+function clampScale(s) {
+  const n = Number(s);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1.8, Math.max(0.6, n));
+}
+
+let petScale = clampScale(config.load().scale);
+let PET_W = Math.round(BASE_PET_W * petScale);
+let PET_H = Math.round(BASE_PET_H * petScale);
+
+// Resize the pet window to match a new scale, keeping it on screen. The
+// renderer scales the sprite itself when it receives the updated config.
+function applyPetScale(scale) {
+  petScale = clampScale(scale);
+  PET_W = Math.round(BASE_PET_W * petScale);
+  PET_H = Math.round(BASE_PET_H * petScale);
+  REMOTE_W = Math.round(BASE_REMOTE_W * petScale);
+  REMOTE_H = Math.round(BASE_REMOTE_H * petScale);
+
+  if (petWin) {
+    const [x, y] = petWin.getPosition();
+    const area = screen.getDisplayNearestPoint({ x, y }).workArea;
+    const nx = Math.max(area.x, Math.min(x, area.x + area.width - PET_W));
+    const ny = Math.max(area.y, Math.min(y, area.y + area.height - PET_H));
+    petWin.setBounds({ x: nx, y: ny, width: PET_W, height: PET_H });
+    config.save({ position: { x: nx, y: ny } });
+  }
+
+  // Friends' frogs grow/shrink to match, kept on screen and told to rescale.
+  for (const [id, w] of remoteWins) {
+    if (w.isDestroyed()) continue;
+    const [rx, ry] = w.getPosition();
+    const { x: cx, y: cy } = clampToWorkArea(rx, ry, REMOTE_W, REMOTE_H);
+    w.setBounds({ x: cx, y: cy, width: REMOTE_W, height: REMOTE_H });
+    w.webContents.send('peer:scale', { scale: petScale });
+    const cfg = config.load();
+    config.save({ remotePositions: { ...(cfg.remotePositions || {}), [id]: { x: cx, y: cy } } });
+  }
+}
 
 let petWin = null;
 let inputWin = null;
@@ -49,13 +102,19 @@ let settingsWin = null;
 let tray = null;
 
 // --- Multiplayer state -----------------------------------------------------
-const REMOTE_W = 120;
-const REMOTE_H = 176; // frog (112) + headroom for the speech bubble
+// Friends' frogs scale with the same `scale` setting as your own, so these are
+// the base (scale = 1) dimensions and REMOTE_W/REMOTE_H are the scaled ones.
+const BASE_REMOTE_W = 120;
+const BASE_REMOTE_H = 176; // frog (112) + headroom for the speech bubble
+let REMOTE_W = Math.round(BASE_REMOTE_W * petScale);
+let REMOTE_H = Math.round(BASE_REMOTE_H * petScale);
 let netWin = null; // hidden helper renderer hosting the WebRTC mesh
 let messageWin = null; // the "speak to this friend" DM composer
 let nameWin = null; // first-run "name your frog" popup
 let friendsWin = null; // the friends panel
-let shoutWin = null; // the "shout to everyone" composer
+let slotPickerWin = null; // the "pick an app for this frog slot" popover
+let pendingSlotIndex = 0; // which slot the open picker is editing
+const FROG_SLOT = 3; // slots[0..2] are the arc buttons; slots[3] is the frog
 const remoteWins = new Map(); // friendId -> BrowserWindow (a friend's frog)
 const presence = new Map(); // friendId -> boolean (Supabase presence)
 const connected = new Set(); // friendIds with an open P2P data channel
@@ -124,6 +183,11 @@ function createPetWindow() {
 
   petWin.loadFile(path.join(__dirname, 'pet', 'index.html'));
 
+  // If something's already notifying when the pet (re)loads, hide its badge.
+  petWin.webContents.on('did-finish-load', () => {
+    if (frogNotifying && petWin) petWin.webContents.send('frog:notify', true);
+  });
+
   petWin.on('closed', () => {
     petWin = null;
   });
@@ -156,8 +220,10 @@ function openInputWindow() {
   let y = primary.y + MARGIN + PET_H;
   if (b) {
     // Prefer to sit just below the frog, nudged so it stays on screen.
+    // Discount the transparent pad below the frog so we hug its feet, not the
+    // (now taller) window's edge.
     x = Math.min(Math.max(b.x + b.width / 2 - W / 2, primary.x), primary.x + primary.width - W);
-    y = b.y + b.height - 10;
+    y = b.y + b.height - PET_BOTTOM_PAD - 10;
     if (y + H > primary.y + primary.height) y = b.y - H + 10; // flip above if no room
   }
 
@@ -180,7 +246,7 @@ function openInputWindow() {
   });
   inputWin.setAlwaysOnTop(true, 'screen-saver');
   inputWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
-  inputWin.loadFile(path.join(__dirname, 'input', 'index.html'));
+  inputWin.loadFile(path.join(__dirname, 'apps', 'journal', 'index.html'));
   inputWin.once('ready-to-show', () => {
     inputWin.webContents.send('input:init', { attention: attentionActive });
   });
@@ -196,10 +262,14 @@ function closeInputWindow() {
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-function openSettingsWindow() {
+// Open (or focus) settings, optionally jumping straight to a named view
+// ('appearance', 'friends', 'apps', or an app id). Passed to the renderer once
+// it's ready via the `settings:navigate` message.
+function openSettingsWindow(initialView) {
   if (settingsWin) {
     settingsWin.show();
     settingsWin.focus();
+    if (initialView) settingsWin.webContents.send('settings:navigate', initialView);
     return;
   }
   const W = 380;
@@ -230,6 +300,11 @@ function openSettingsWindow() {
   });
   settingsWin.setAlwaysOnTop(true, 'screen-saver');
   settingsWin.loadFile(path.join(__dirname, 'settings', 'index.html'));
+  if (initialView) {
+    settingsWin.webContents.once('did-finish-load', () => {
+      if (settingsWin) settingsWin.webContents.send('settings:navigate', initialView);
+    });
+  }
   settingsWin.on('closed', () => {
     settingsWin = null;
   });
@@ -247,6 +322,7 @@ function createTray() {
     { label: 'Make it jump', click: () => bigJump() },
     { type: 'separator' },
     { label: 'Settings...', click: () => openSettingsWindow() },
+    { label: 'Check for updates...', click: () => updater.checkForUpdates({ silent: false }) },
     { type: 'separator' },
     { label: 'Quit Froggy', click: () => quitApp() }
   ]);
@@ -302,6 +378,7 @@ function nag() {
 
 function startAttention() {
   attentionActive = true;
+  syncFrogNotify();
   sleeping = false; // an attention jump wakes the frog
   nag();
   if (snoozeTimer) clearInterval(snoozeTimer);
@@ -315,6 +392,7 @@ function startAttention() {
 
 function stopAttention() {
   attentionActive = false;
+  syncFrogNotify();
   if (snoozeTimer) {
     clearInterval(snoozeTimer);
     snoozeTimer = null;
@@ -364,6 +442,24 @@ function friendLabel(id) {
   return (f && f.label) || 'Friend';
 }
 
+// Last-known skin colour for a friend, so an offline (back-turned) frog still
+// shows the right skin after a restart instead of falling back to green.
+function friendColor(id) {
+  const cfg = config.load();
+  const f = (cfg.friends || []).find((x) => x.id === id);
+  return (f && f.color) || null;
+}
+
+function saveFriendColor(id, color) {
+  if (!color) return;
+  const cfg = config.load();
+  const friends = [...(cfg.friends || [])];
+  const f = friends.find((x) => x.id === id);
+  if (!f || f.color === color) return;
+  f.color = color;
+  config.save({ friends });
+}
+
 function selfName() {
   const cfg = config.load();
   return (cfg.displayName || cfg.author || 'A froggy friend').trim();
@@ -381,6 +477,7 @@ function pushFriends() {
   const payload = { selfId: cfg.selfId, friends };
   if (settingsWin) settingsWin.webContents.send('friends:changed', payload);
   if (friendsWin) friendsWin.webContents.send('friends:changed', payload);
+  syncFrogNotify(); // an incoming invite hides the frog's slot badge
 }
 
 // A friend's P2P link opened or closed: flip their frog (away <-> alive), update
@@ -471,6 +568,11 @@ function startNetworking() {
   // Show every accepted friend right away — turned away until their P2P link opens.
   for (const id of acceptedIds()) spawnRemoteFrog(id);
 
+  // Publish my own skin and pull down friends' saved skins so their (offline,
+  // back-turned) frogs already show the right color before any P2P link opens.
+  signaling.publishProfile(cfg.color);
+  syncFriendSkins();
+
   // Invite broadcasts are ephemeral, so a request sent while the other frog was
   // offline (or before Supabase was configured) never arrived. Re-send any still
   // pending outgoing invites once we're connected.
@@ -556,6 +658,19 @@ function removeFriendLocally(id) {
   pushFriends();
 }
 
+// Pull friends' stored skins from Supabase and apply them to their frog windows
+// (and remember them locally), so an offline friend shows their real color.
+async function syncFriendSkins() {
+  const ids = acceptedIds();
+  if (!ids.length) return;
+  const profiles = await signaling.fetchProfiles(ids);
+  for (const [id, color] of Object.entries(profiles)) {
+    if (!color) continue;
+    saveFriendColor(id, color);
+    sendToRemote(id, 'peer:event', { type: 'color', color });
+  }
+}
+
 function restartNetworking() {
   try {
     signaling.stop();
@@ -618,12 +733,14 @@ function spawnRemoteFrog(friendId) {
       nodeIntegration: false
     }
   });
-  win.setAlwaysOnTop(true, 'screen-saver');
+  // One level below the pet's 'screen-saver' so your own frog always renders
+  // on top of every remote frog, while still floating above normal windows.
+  win.setAlwaysOnTop(true, 'pop-up-menu');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   win.setOpacity(typeof cfg.opacity === 'number' ? cfg.opacity : 1);
   win.loadFile(path.join(__dirname, 'pet', 'remote.html'), {
-    query: { id: friendId, label }
+    query: { id: friendId, label, color: friendColor(friendId) || '', scale: String(petScale) }
   });
   win.webContents.on('did-finish-load', () => {
     if (!win.isDestroyed()) win.webContents.send('peer:presence', { online: connected.has(friendId) });
@@ -667,6 +784,9 @@ function handlePeerData(friendId, msg) {
     } catch {}
     return;
   }
+
+  // Remember the friend's skin so their offline frog keeps it across restarts.
+  if (msg.type === 'color') saveFriendColor(friendId, msg.color);
 
   const w = remoteWins.get(friendId);
   if (w) w.webContents.send('peer:event', msg);
@@ -814,30 +934,62 @@ function openFriendsWindow() {
   });
 }
 
-// The shout composer (right button over the frog): all-caps to everyone.
-function openShoutWindow() {
-  if (shoutWin) {
-    shoutWin.show();
-    shoutWin.focus();
-    return;
+// ---------------------------------------------------------------------------
+// App slots (the three quick-launch buttons around the frog)
+// ---------------------------------------------------------------------------
+// What clicking a filled slot does, per app id. Journal and Shout have their
+// own popups; the timer/reminder apps open straight to their settings panel.
+const APP_LAUNCHERS = {
+  journal: () => openInputWindow(),
+  shout: () => shout.open(),
+  // Clicking the Pomodoro slot toggles the timer (start focus / stop the
+  // cycle). Its focus/break lengths live in Settings, reached via a long-press
+  // on the slot. See togglePomodoro / the Pomodoro app section below.
+  pomodoro: () => togglePomodoro(),
+  // Clicking the Countdown slot starts / cancels a one-shot timer; when it
+  // ends a message dialog pops above the frog. Duration + message in Settings.
+  countdown: () => toggleCountdown(),
+  water: () => openSettingsWindow('app-water')
+};
+
+function launchApp(id) {
+  const fn = APP_LAUNCHERS[id];
+  if (fn) fn();
+  else openSettingsWindow('apps'); // unknown/uninstalled: fall back to the list
+}
+
+// The slot picker popover — a small transient window anchored under the frog,
+// mirroring the journal/shout popups. It closes on blur or after any choice.
+function openSlotPicker(index) {
+  pendingSlotIndex = index;
+  if (slotPickerWin) {
+    slotPickerWin.close();
+    slotPickerWin = null;
   }
-  const W = 280;
-  const H = 150;
+  const count = apps.list().filter((a) => a.installed).length;
+  const slotId = (config.load().slots || [])[index];
+  const slotApp = slotId ? apps.get(slotId) : null;
+  const hasSettings = !!(slotApp && slotApp.settingsView);
+  const W = 250;
+  // header + one row per app + (the app-settings row when the slot's app has
+  // settings) + padding. Clearing a slot is done by clicking its current app.
+  const H = 30 + count * 42 + (hasSettings ? 42 : 0) + 24;
   const b = petUrl();
   const area = b
     ? screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea
     : screen.getPrimaryDisplay().workArea;
-  let x = Math.round(area.x + (area.width - W) / 2);
-  let y = Math.round(area.y + (area.height - H) / 2);
+  let x = area.x + area.width - W - MARGIN;
+  let y = area.y + MARGIN + PET_H;
   if (b) {
     x = Math.min(Math.max(b.x + b.width / 2 - W / 2, area.x), area.x + area.width - W);
-    y = Math.min(b.y + b.height - 10, area.y + area.height - H);
+    y = b.y + b.height - PET_BOTTOM_PAD - 10;
+    if (y + H > area.y + area.height) y = b.y - H + 10; // flip above if no room
   }
-  shoutWin = new BrowserWindow({
+  slotPickerWin = new BrowserWindow({
     width: W,
     height: H,
-    x,
-    y,
+    x: Math.round(x),
+    y: Math.round(y),
     frame: false,
     transparent: true,
     resizable: false,
@@ -850,11 +1002,25 @@ function openShoutWindow() {
       nodeIntegration: false
     }
   });
-  shoutWin.setAlwaysOnTop(true, 'screen-saver');
-  shoutWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
-  shoutWin.loadFile(path.join(__dirname, 'shout', 'index.html'));
-  shoutWin.on('closed', () => {
-    shoutWin = null;
+  slotPickerWin.setAlwaysOnTop(true, 'screen-saver');
+  slotPickerWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  slotPickerWin.loadFile(path.join(__dirname, 'slots', 'index.html'), {
+    query: { index: String(index) }
+  });
+  // Close when the user clicks away — but ignore the spurious blur macOS fires
+  // right after a frameless, transparent, always-on-top window first appears
+  // (which would otherwise slam the picker shut the instant it opened).
+  let closeOnBlur = false;
+  slotPickerWin.once('show', () => {
+    setTimeout(() => {
+      closeOnBlur = true;
+    }, 300);
+  });
+  slotPickerWin.on('blur', () => {
+    if (closeOnBlur && slotPickerWin) slotPickerWin.close();
+  });
+  slotPickerWin.on('closed', () => {
+    slotPickerWin = null;
   });
 }
 
@@ -906,6 +1072,203 @@ function applyAutoLaunch() {
 }
 
 // ---------------------------------------------------------------------------
+// Frog notifications
+// ---------------------------------------------------------------------------
+// Any app (and, separately, friend requests) can "notify": the frog grabs your
+// attention, and the *next* tap on the frog is delivered to whoever raised the
+// notification instead of doing the frog's default thing. Newest notification
+// wins. The handler returns whether it actually consumed the tap; if it didn't
+// (e.g. it went stale), we fall through to the normal frog-click behavior so a
+// forgotten notification never silently eats a tap.
+let pendingNotification = null; // { source, onInteract }
+let frogNotifying = false; // last state pushed to the pet window
+
+// The frog's slot badge hides whenever a tap would be intercepted rather than
+// launch the slot's app — i.e. while an app is notifying, a friend invite is
+// waiting, or the journal is nagging. Push that state to the pet so it can hide
+// the badge and let the notifier take visual priority.
+function syncFrogNotify() {
+  const next =
+    !!pendingNotification ||
+    attentionActive ||
+    (config.load().friends || []).some((f) => f.status === 'incoming');
+  if (next === frogNotifying) return;
+  frogNotifying = next;
+  if (petWin) petWin.webContents.send('frog:notify', next);
+}
+
+function notifyOnFrog(source, onInteract) {
+  pendingNotification = { source, onInteract };
+  syncFrogNotify();
+}
+
+function clearFrogNotification(source) {
+  if (pendingNotification && (!source || pendingNotification.source === source)) {
+    pendingNotification = null;
+    syncFrogNotify();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pomodoro app
+// ---------------------------------------------------------------------------
+// A single background timer, driven by taps on the frog. Clicking the Pomodoro
+// slot starts a focus block and shows a live countdown floating above the frog;
+// when the timer runs out the frog leaps + dances and the countdown waits.
+// Tapping the frog then starts the break, and so on, until the slot is clicked
+// again to stop. The countdown is streamed to the pet window every tick; its
+// focus/break lengths are configured in Settings.
+function pushPomodoro(state) {
+  if (petWin) petWin.webContents.send('pomodoro:state', state);
+}
+
+// A phase's timer ran out: a big leap followed by a happy little dance to grab
+// attention, inviting a tap to roll into the next phase.
+function frogAlert() {
+  bigJump();
+  setTimeout(danceLocal, 260);
+}
+
+const pomodoro = createPomodoro({
+  getDurations: () => config.load().pomodoro || {},
+  onTick: (state) => pushPomodoro(state),
+  onPhaseChange: (phase) => {
+    markActivity();
+  },
+  onComplete: (finishedPhase) => {
+    markActivity();
+    if (finishedPhase === 'focus') {
+      notify('Pomodoro', 'Focus done — tap the frog to start your break.');
+    } else {
+      notify('Pomodoro', 'Break over — tap the frog to focus again.');
+    }
+    frogAlert();
+    // The frog is now waiting for a tap to roll into the next phase.
+    notifyOnFrog('pomodoro', () => pomodoro.advance());
+  }
+});
+
+function togglePomodoro() {
+  markActivity();
+  pomodoro.toggle(); // start()/stop() each emit a tick, refreshing the overlay
+  clearFrogNotification('pomodoro'); // starting/stopping resolves any pending tap
+}
+
+// ---------------------------------------------------------------------------
+// Water reminder app
+// ---------------------------------------------------------------------------
+const waterReminder = createReminder({
+  getConfig: () => config.load().water || {},
+  onRemind: (message) => {
+    notify('Drink water', message);
+    danceLocal();
+    // Tapping the frog acknowledges it — restart the countdown from now.
+    notifyOnFrog('water', () => {
+      waterReminder.reschedule();
+      return true;
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Countdown app
+// ---------------------------------------------------------------------------
+// A one-shot timer. Clicking the Countdown slot starts it and floats a live
+// readout above the frog (sharing the Pomodoro overlay); clicking again cancels
+// it. When it reaches zero, a small dialog — tinted with the app's color — pops
+// above the frog with your message. Duration + message are set in Settings.
+let countdownAlertWin = null;
+
+// The Countdown app's accent, taken from the app registry so the overlay and
+// the end dialog match its catalog color.
+function countdownColor() {
+  const app = apps.get('countdown');
+  return (app && app.color) || '#8b5cf6';
+}
+
+function pushCountdown(state) {
+  if (petWin) petWin.webContents.send('countdown:state', state);
+}
+
+const countdown = createCountdown({
+  getConfig: () => ({ ...(config.load().countdown || {}), color: countdownColor() }),
+  onTick: (state) => pushCountdown(state),
+  onDone: (message, color) => {
+    markActivity();
+    notify('Countdown', message);
+    frogAlert();
+    openCountdownAlert(message, color);
+  }
+});
+
+function toggleCountdown() {
+  markActivity();
+  countdown.toggle(); // start()/stop() each emit a tick, refreshing the overlay
+}
+
+// The end-of-countdown message, popped as a bubble dialog above the frog
+// (mirroring the shout composer's placement). Read-only; closes on dismiss.
+function openCountdownAlert(message, color) {
+  if (countdownAlertWin) {
+    countdownAlertWin.close();
+    countdownAlertWin = null;
+  }
+  const W = 300;
+  const H = 160;
+  const b = petUrl();
+  const area = b
+    ? screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea
+    : screen.getPrimaryDisplay().workArea;
+  let x = area.x + area.width - W - MARGIN;
+  let y = area.y + MARGIN;
+  if (b) {
+    x = Math.min(Math.max(b.x + b.width / 2 - W / 2, area.x), area.x + area.width - W);
+    y = b.y - H + 24;
+    if (y < area.y) y = b.y + b.height - PET_BOTTOM_PAD - 10; // flip below if no room above
+  }
+  countdownAlertWin = new BrowserWindow({
+    width: W,
+    height: H,
+    x: Math.round(x),
+    y: Math.round(y),
+    frame: false,
+    transparent: true,
+    resizable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  countdownAlertWin.setAlwaysOnTop(true, 'screen-saver');
+  countdownAlertWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  countdownAlertWin.loadFile(path.join(__dirname, 'apps', 'countdown', 'index.html'), {
+    query: { message: String(message || ''), color: String(color || '') }
+  });
+  countdownAlertWin.on('closed', () => {
+    countdownAlertWin = null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shout app
+// ---------------------------------------------------------------------------
+// Owns the composer window; we hand it the frog's geometry and a broadcaster
+// that fans the message out to every connected friend over the P2P mesh.
+const shout = createShout({
+  getPetBounds: () => petUrl(),
+  broadcast: (text) => {
+    if (netWin) netWin.webContents.send('mesh:broadcast', { type: 'shout', text });
+  },
+  preloadPath: path.join(__dirname, 'preload.js'),
+  margin: MARGIN,
+  bottomPad: PET_BOTTOM_PAD
+});
+
+// ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 function registerIpc() {
@@ -932,6 +1295,15 @@ function registerIpc() {
 
   ipcMain.on('pet:click', () => {
     markActivity();
+    // If an app is notifying (e.g. a finished Pomodoro phase, a water reminder),
+    // the tap is its interaction — hand it over. onInteract returns false when
+    // the notification has gone stale, in which case we fall through.
+    if (pendingNotification) {
+      const n = pendingNotification;
+      pendingNotification = null;
+      syncFrogNotify();
+      if (n.onInteract()) return;
+    }
     // If a friend invite is waiting, clicking the frog opens the friends panel
     // so you can accept it.
     const cfg = config.load();
@@ -939,21 +1311,82 @@ function registerIpc() {
       openFriendsWindow();
       return;
     }
-    // Otherwise clicking acknowledges the nag: stop jumping and open the journal.
-    stopAttention();
-    openInputWindow();
+    // A journal nag waiting? The tap acknowledges it: stop jumping, open the
+    // composer.
+    if (attentionActive) {
+      stopAttention();
+      openInputWindow();
+      return;
+    }
+    // Otherwise the frog is itself a slot (the 4th): launch the app assigned to
+    // it, or open the picker so you can assign one.
+    const frogApp = (cfg.slots || [])[FROG_SLOT];
+    if (frogApp) launchApp(frogApp);
+    else openSlotPicker(FROG_SLOT);
   });
   ipcMain.on('pet:open-settings', () => openSettingsWindow());
+  ipcMain.on('pet:open-apps', () => openSettingsWindow('apps'));
   ipcMain.on('pet:open-friends', () => openFriendsWindow());
   ipcMain.on('pet:open-journal', () => openInputWindow());
-  ipcMain.on('pet:open-shout', () => openShoutWindow());
+  ipcMain.on('pet:open-shout', () => shout.open());
 
-  // Shout: broadcast an all-caps message to every connected friend.
-  ipcMain.on('shout:send', (_e, { text }) => {
-    const t = String(text || '').trim().toUpperCase().slice(0, 200);
-    if (!t) return;
-    if (netWin) netWin.webContents.send('mesh:broadcast', { type: 'shout', text: t });
+  // --- App slots -----------------------------------------------------------
+  // Click a filled slot -> launch its app; click an empty slot -> pick one.
+  ipcMain.on('pet:launch-slot', (_e, index) => {
+    markActivity();
+    const id = (config.load().slots || [])[index];
+    if (id) launchApp(id);
+    else openSlotPicker(index);
   });
+  // Long-press / right-click -> always open the picker to change/clear.
+  ipcMain.on('pet:edit-slot', (_e, index) => openSlotPicker(index));
+
+  // The picker asks for the current slots + app catalog to render itself.
+  ipcMain.handle('slots:context', () => ({
+    index: pendingSlotIndex,
+    slots: config.load().slots || [],
+    apps: apps.list()
+  }));
+
+  // Assign (or clear, when appId is null) a slot. An app can only live in one
+  // slot, so if it's already elsewhere we move it. The frog re-renders live.
+  ipcMain.handle('slots:set', (_e, { index, appId }) => {
+    const slots = [...(config.load().slots || [null, null, null, null])];
+    while (slots.length < 4) slots.push(null); // 3 arc slots + the frog itself
+    if (appId) {
+      for (let i = 0; i < slots.length; i++) if (slots[i] === appId) slots[i] = null;
+    }
+    slots[index] = appId || null;
+    const next = config.save({ slots });
+    if (petWin) petWin.webContents.send('config:updated', next);
+    return next.slots;
+  });
+
+  // Jump straight to the settings screen of the app in the slot (e.g. the
+  // 'pomodoro' view). Falls back to the Applications list if unknown.
+  ipcMain.on('slots:open-app-settings', (_e, settingsView) => {
+    openSettingsWindow(settingsView ? `app-${settingsView}` : 'apps');
+  });
+
+  // The Applications screen in settings asks for the list of installed apps.
+  ipcMain.handle('apps:list', () => apps.list());
+
+  // --- Pomodoro app --------------------------------------------------------
+  // The cycle is driven by the frog: the slot toggles it (pet:launch-slot ->
+  // togglePomodoro) and a tap advances a finished phase (pet:click). The pet
+  // overlay just reads the current state on load; live updates arrive via the
+  // 'pomodoro:state' broadcast.
+  ipcMain.handle('pomodoro:get', () => pomodoro.getState());
+  ipcMain.on('pomodoro:toggle', () => togglePomodoro());
+
+  // --- Countdown app -------------------------------------------------------
+  // Slot click toggles it (pet:launch-slot -> toggleCountdown). The pet overlay
+  // reads current state on load; live updates arrive via 'countdown:state'.
+  ipcMain.handle('countdown:get', () => countdown.getState());
+  ipcMain.on('countdown:toggle', () => toggleCountdown());
+
+  // Shout: normalize + broadcast an all-caps message to every connected friend.
+  ipcMain.on('shout:send', (_e, { text }) => shout.send(text));
 
   ipcMain.handle('note:save', (_e, text) => {
     const cfg = config.load();
@@ -994,6 +1427,10 @@ function registerIpc() {
       if (petWin) petWin.setOpacity(op);
       for (const w of remoteWins.values()) w.setOpacity(op);
     }
+    if (Object.prototype.hasOwnProperty.call(p, 'scale')) applyPetScale(next.scale);
+    if (Object.prototype.hasOwnProperty.call(p, 'water')) waterReminder.reschedule();
+    // Share your new skin so friends' copies of your frog update, even offline.
+    if (Object.prototype.hasOwnProperty.call(p, 'color')) signaling.publishProfile(next.color);
     // Reconnect the mesh if the signaling backend changed; refresh ICE servers
     // (STUN/TURN) in place if only the relay config changed.
     if (Object.prototype.hasOwnProperty.call(p, 'supabase')) {
@@ -1178,7 +1615,12 @@ app.whenReady().then(() => {
   scheduleHourly();
   startSleepWatch();
   startNetworking();
+  waterReminder.reschedule();
   if (!config.load().displayName) openNameWindow();
+
+  // Quietly check GitHub for a newer release a few seconds after launch, once
+  // things have settled. Stays silent when up to date or offline.
+  setTimeout(() => updater.checkForUpdates({ silent: true }), 8000);
 
   app.on('activate', () => {
     if (!petWin) createPetWindow();

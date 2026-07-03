@@ -14,6 +14,12 @@
 // All application data (frog beats + chat) rides the data channels below and
 // is DTLS-encrypted end-to-end; it never returns to the signaling server.
 
+(function () {
+// Guard against the script being evaluated more than once in the same realm
+// (top-level declarations would otherwise collide and abort the whole module).
+if (window.__froggyMeshLoaded) return;
+window.__froggyMeshLoaded = true;
+
 const api = window.api;
 
 let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -24,6 +30,12 @@ api.on('mesh:config', (cfg) => {
     iceServers = cfg.iceServers;
   }
 });
+
+// RTCSessionDescription exposes type/sdp as prototype getters, which get lost
+// when the object is cloned through IPC + JSON. Send a plain object instead.
+function sdpJson(desc) {
+  return { type: desc.type, sdp: desc.sdp };
+}
 
 function wireChannel(friendId, dc, entry) {
   entry.dc = dc;
@@ -47,7 +59,7 @@ function makePeer(friendId, initiator) {
   peers.set(friendId, entry);
 
   pc.onicecandidate = (e) => {
-    if (e.candidate) api.send('mesh:signal-out', { friendId, kind: 'ice', data: e.candidate });
+    if (e.candidate) api.send('mesh:signal-out', { friendId, kind: 'ice', data: e.candidate.toJSON() });
   };
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
@@ -59,7 +71,7 @@ function makePeer(friendId, initiator) {
     wireChannel(friendId, dc, entry);
     pc.createOffer()
       .then((offer) => pc.setLocalDescription(offer))
-      .then(() => api.send('mesh:signal-out', { friendId, kind: 'offer', data: pc.localDescription }))
+      .then(() => api.send('mesh:signal-out', { friendId, kind: 'offer', data: sdpJson(pc.localDescription) }))
       .catch((err) => console.warn('offer failed', err));
   } else {
     pc.ondatachannel = (e) => wireChannel(friendId, e.channel, entry);
@@ -94,14 +106,14 @@ api.on('mesh:signal-in', async ({ friendId, kind, data }) => {
       await pc.setRemoteDescription(new RTCSessionDescription(data));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      api.send('mesh:signal-out', { friendId, kind: 'answer', data: pc.localDescription });
+      api.send('mesh:signal-out', { friendId, kind: 'answer', data: sdpJson(pc.localDescription) });
     } else if (kind === 'answer') {
       await pc.setRemoteDescription(new RTCSessionDescription(data));
     } else if (kind === 'ice') {
       await pc.addIceCandidate(new RTCIceCandidate(data));
     }
   } catch (err) {
-    console.warn('signal-in handling failed', kind, err);
+    console.warn('signal-in handling failed', kind, err && err.message);
   }
 });
 
@@ -122,3 +134,4 @@ api.on('mesh:broadcast', (msg) => {
 api.on('mesh:send', ({ friendId, msg }) => {
   sendTo(peers.get(friendId), msg);
 });
+})();
