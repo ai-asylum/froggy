@@ -1,6 +1,6 @@
 {
   "name": "froggy-microblog",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A frog desktop pet that prompts you hourly to micro-blog what you've been doing, saved to your team vault.",
   "main": "src/main.js",
   "author": "ruben.gres",
