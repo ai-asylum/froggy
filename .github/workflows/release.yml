@@ -31,6 +31,20 @@ jobs:
           node-version: 20
           cache: npm
 
+      # uiohook-napi is a native module that links against X11 at build time.
+      # The GitHub-hosted Ubuntu runners don't ship these headers by default.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxtst-dev \
+            libxt-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbfile-dev
+
       - name: Install dependencies
         run: npm ci
 
