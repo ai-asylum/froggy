@@ -31,31 +31,6 @@ jobs:
           node-version: 20
           cache: npm
 
-      # node-gyp's bundled gyp still imports distutils, which was removed from
-      # the Python 3.12+ stdlib shipped on the runners. Pin 3.11 so the native
-      # rebuild of uiohook-napi works on every OS.
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      # uiohook-napi is a native module that links against X11 at build time.
-      # The GitHub-hosted Ubuntu runners don't ship these headers by default.
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libx11-dev \
-            libxtst-dev \
-            libxt-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libx11-xcb-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            libxkbfile-dev
-
       - name: Install dependencies
         run: npm ci
 

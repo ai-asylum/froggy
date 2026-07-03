@@ -20,6 +20,7 @@
     "appId": "com.aiasylum.froggy",
     "productName": "Froggy",
     "copyright": "Copyright © ruben.gres",
+    "npmRebuild": false,
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -74,8 +75,7 @@
     "linux": {
       "category": "Utility",
       "target": [
-        "AppImage",
-        "deb"
+        "AppImage"
       ]
     }
   },
