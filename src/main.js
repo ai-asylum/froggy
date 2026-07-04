@@ -101,6 +101,15 @@ let inputWin = null;
 let settingsWin = null;
 let tray = null;
 
+// Pixel-perfect click-through relies on setIgnoreMouseEvents(..., { forward:
+// true }) so the renderer still receives mouse-move while the window is
+// click-through. That `forward` option only works on macOS and Windows — on
+// Linux the events aren't forwarded, so the frog would be stuck permanently
+// click-through (no hover buttons, no dragging). Keep those windows always
+// interactive on Linux instead, trading a small transparent dead-zone around
+// the frog for a frog you can actually grab.
+const SUPPORTS_CLICK_THROUGH = process.platform !== 'linux';
+
 // --- Multiplayer state -----------------------------------------------------
 // Friends' frogs scale with the same `scale` setting as your own, so these are
 // the base (scale = 1) dimensions and REMOTE_W/REMOTE_H are the scaled ones.
@@ -184,8 +193,9 @@ function createPetWindow() {
   currentDisplayId = screen.getDisplayNearestPoint({ x: x + PET_W / 2, y: y + PET_H / 2 }).id;
 
   // Start click-through; the renderer toggles this off when the cursor is over
-  // an opaque frog pixel (pixel-perfect hit testing).
-  petWin.setIgnoreMouseEvents(true, { forward: true });
+  // an opaque frog pixel (pixel-perfect hit testing). On Linux forwarding isn't
+  // supported, so stay interactive to keep hover + dragging working.
+  if (SUPPORTS_CLICK_THROUGH) petWin.setIgnoreMouseEvents(true, { forward: true });
 
   petWin.setOpacity(typeof cfg.opacity === 'number' ? cfg.opacity : 1);
 
@@ -859,7 +869,7 @@ function spawnRemoteFrog(friendId, opts = {}) {
   // on top of every remote frog, while still floating above normal windows.
   win.setAlwaysOnTop(true, 'pop-up-menu');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
-  win.setIgnoreMouseEvents(true, { forward: true });
+  if (SUPPORTS_CLICK_THROUGH) win.setIgnoreMouseEvents(true, { forward: true });
   win.setOpacity(typeof cfg.opacity === 'number' ? cfg.opacity : 1);
   win.loadFile(path.join(__dirname, 'pet', 'remote.html'), {
     query: {
@@ -1476,7 +1486,9 @@ const shout = createShout({
 // ---------------------------------------------------------------------------
 function registerIpc() {
   ipcMain.on('pet:set-ignore', (_e, ignore) => {
-    if (petWin) petWin.setIgnoreMouseEvents(!!ignore, { forward: true });
+    if (!petWin) return;
+    if (!SUPPORTS_CLICK_THROUGH) return; // stays interactive on Linux
+    petWin.setIgnoreMouseEvents(!!ignore, { forward: true });
   });
 
   ipcMain.on('pet:move', (_e, pos) => {
@@ -1757,6 +1769,7 @@ function registerIpc() {
 
   // Remote frog window: click-through, dragging, and click-to-message.
   ipcMain.on('remote:set-ignore', (_e, { id, ignore }) => {
+    if (!SUPPORTS_CLICK_THROUGH) return; // stays interactive on Linux
     const w = remoteWins.get(id);
     if (w) w.setIgnoreMouseEvents(!!ignore, { forward: true });
   });
