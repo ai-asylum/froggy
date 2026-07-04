@@ -110,6 +110,14 @@ let tray = null;
 // the frog for a frog you can actually grab.
 const SUPPORTS_CLICK_THROUGH = process.platform !== 'linux';
 
+// Global keyboard hooks (libuiohook) are fundamentally broken on Wayland: its
+// X11 XKB queries fail (dropping keys), and some setups even segfault on load.
+// Detect Wayland so we can skip the hook there and fall back to cursor polling.
+const IS_WAYLAND =
+  process.platform === 'linux' &&
+  (String(process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland' ||
+    !!process.env.WAYLAND_DISPLAY);
+
 // --- Multiplayer state -----------------------------------------------------
 // Friends' frogs scale with the same `scale` setting as your own, so these are
 // the base (scale = 1) dimensions and REMOTE_W/REMOTE_H are the scaled ones.
@@ -505,13 +513,29 @@ function pushFriends() {
   syncFrogNotify(); // an incoming invite hides the frog's slot badge
 }
 
-// A friend's P2P link opened or closed: flip their frog (away <-> alive), update
-// the online dot in the friends panel, and keep the connected set in sync.
+// Whether a peer is "here" — enough to face their frog forward. A person counts
+// as present when they're visible over Supabase presence (a friend's pair
+// channel or a shared room), or when a direct P2P link is open. The frog only
+// turns its back (the sleepy, away pose) when the person is truly gone; it must
+// NOT depend on the P2P data channel alone, or a connected friend whose direct
+// link never establishes (common behind NATs) would look asleep forever.
+function isPeerPresent(friendId) {
+  return connected.has(friendId) || !!presence.get(friendId) || roomMembers.has(friendId);
+}
+
+// Push the current presence to a friend's frog window so it faces forward when
+// they're around and turns away when they leave.
+function refreshRemotePresence(friendId) {
+  const w = remoteWins.get(friendId);
+  if (w && !w.isDestroyed()) w.webContents.send('peer:presence', { online: isPeerPresent(friendId) });
+}
+
+// A friend's P2P link opened or closed: refresh their frog's pose from presence,
+// update the online dot in the friends panel, and keep the connected set in sync.
 function setConnected(friendId, isConnected) {
   if (isConnected) connected.add(friendId);
   else connected.delete(friendId);
-  const w = remoteWins.get(friendId);
-  if (w && !w.isDestroyed()) w.webContents.send('peer:presence', { online: isConnected });
+  refreshRemotePresence(friendId);
   const payload = { id: friendId, online: isConnected };
   if (settingsWin) settingsWin.webContents.send('friends:presence', payload);
   if (friendsWin) friendsWin.webContents.send('friends:presence', payload);
@@ -576,9 +600,12 @@ function startNetworking() {
             initiator: String(cfg.selfId) < String(friendId)
           });
         }
-        // Their frog stays on screen (turned away) even when offline; the P2P
-        // data channel opening/closing is what flips it back to life.
-        if (!online) setConnected(friendId, false);
+        // Face the frog forward as soon as the person is present (over Supabase
+        // presence), rather than waiting for the P2P data channel — otherwise a
+        // connected friend whose direct link can't be established looks asleep.
+        // A dropped presence also drops the P2P link and turns the frog away.
+        if (online) refreshRemotePresence(friendId);
+        else setConnected(friendId, false);
       },
       onSignal: (friendId, kind, data) => {
         if (netWin) netWin.webContents.send('mesh:signal-in', { friendId, kind, data });
@@ -749,6 +776,10 @@ function onRoomSync(members) {
     if (roomFrogIds.has(id)) {
       roomFrogIds.delete(id);
       if (!isAcceptedFriend(id)) despawnRemoteFrog(id);
+    } else {
+      // A friend who left the shared room keeps their frog; turn it away if
+      // they're not still present through the friendship / a direct link.
+      refreshRemotePresence(id);
     }
   }
 
@@ -756,10 +787,14 @@ function onRoomSync(members) {
     const known = roomMembers.get(id);
     roomMembers.set(id, m);
     if (!known) {
-      // A friend already has a frog on screen; only spawn for strangers.
+      // A friend already has a frog on screen; only spawn for strangers, but
+      // still wake it — sharing a room means they're clearly here, even if the
+      // direct P2P link to that friend hasn't come up.
       if (!remoteWins.has(id)) {
         roomFrogIds.add(id);
         spawnRemoteFrog(id, { label: m.name, color: m.color, online: true });
+      } else {
+        refreshRemotePresence(id);
       }
     } else if (roomFrogIds.has(id) && m.color && m.color !== known.color) {
       const w = remoteWins.get(id);
@@ -795,6 +830,9 @@ function leaveRoomLocal(opts = {}) {
   roomMembers.clear();
   currentRoom = '';
   config.save({ room: '' });
+  // Kept frogs (accepted friends) may have been present only via this room —
+  // refresh their pose so they turn away unless still reachable another way.
+  for (const id of remoteWins.keys()) refreshRemotePresence(id);
   if (!opts.silent) pushRoom();
 }
 
@@ -882,7 +920,7 @@ function spawnRemoteFrog(friendId, opts = {}) {
   win.webContents.on('did-finish-load', () => {
     if (win.isDestroyed()) return;
     win.webContents.send('anim:enabled', { on: config.load().animations !== false });
-    win.webContents.send('peer:presence', { online: !!opts.online || connected.has(friendId) });
+    win.webContents.send('peer:presence', { online: !!opts.online || isPeerPresent(friendId) });
   });
   // Only forget this window if the map still points at it — a despawn followed
   // by an immediate respawn (friend -> room frog) must not lose the new window.
@@ -1242,6 +1280,12 @@ function openSlotPicker(index) {
 // Global keyboard hook -> small hop
 // ---------------------------------------------------------------------------
 function startKeyboardHook() {
+  // Wayland can't do global key hooks; fall back to watching the cursor so the
+  // frog still reacts to activity (and we avoid libuiohook's Wayland crashes).
+  if (IS_WAYLAND) {
+    startMouseActivityWatch();
+    return;
+  }
   let uIOhook;
   try {
     ({ uIOhook } = require('uiohook-napi'));
@@ -1271,6 +1315,45 @@ function startKeyboardHook() {
   } catch (err) {
     console.warn('Failed to start keyboard hook (grant Accessibility permission):', err.message);
   }
+}
+
+// Wayland fallback for the keyboard hook: there's no global key capture, but
+// Electron can read the global cursor position without any native module. Poll
+// it and treat movement as activity so the frog still wakes and hops.
+let mouseWatchTimer = null;
+let lastCursor = null;
+function startMouseActivityWatch() {
+  if (mouseWatchTimer) return;
+  try {
+    lastCursor = screen.getCursorScreenPoint();
+  } catch {
+    lastCursor = null;
+  }
+  mouseWatchTimer = setInterval(() => {
+    let p;
+    try {
+      p = screen.getCursorScreenPoint();
+    } catch {
+      return;
+    }
+    if (lastCursor) {
+      if (Math.hypot(p.x - lastCursor.x, p.y - lastCursor.y) > 6) {
+        markActivity();
+        if (!inputWin) {
+          const now = Date.now();
+          if (now - lastHopAt >= 600) {
+            lastHopAt = now;
+            if (petWin) petWin.webContents.send('anim:key');
+          }
+        }
+      }
+    }
+    lastCursor = p;
+  }, 300);
+  app.on('will-quit', () => {
+    if (mouseWatchTimer) clearInterval(mouseWatchTimer);
+    mouseWatchTimer = null;
+  });
 }
 
 // ---------------------------------------------------------------------------
