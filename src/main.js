@@ -1294,18 +1294,20 @@ function startKeyboardHook() {
     return;
   }
   try {
-    uIOhook.on('keydown', () => {
-      // Every keystroke counts as activity (wakes the frog) and charges a jump.
+    // Every keystroke/click counts as activity (wakes the frog) and charges a
+    // jump. Light throttle only to guard against key-repeat floods while a key
+    // is held down. Suppressed while the input panel is open so typing your
+    // note doesn't keep it jumping.
+    const onGlobalInput = () => {
       markActivity();
-      // Light throttle only to guard against key-repeat floods while a key is
-      // held down. Suppressed while the input panel is open so typing your note
-      // doesn't keep it jumping.
       if (inputWin) return;
       const now = Date.now();
       if (now - lastHopAt < 20) return;
       lastHopAt = now;
       if (petWin) petWin.webContents.send('anim:key');
-    });
+    };
+    uIOhook.on('keydown', onGlobalInput);
+    uIOhook.on('mousedown', onGlobalInput);
     uIOhook.start();
     app.on('will-quit', () => {
       try {
