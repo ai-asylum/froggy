@@ -59,7 +59,13 @@ const DEFAULTS = {
   room: '',
   // Supabase is used only to link peers (signaling + presence). No frog
   // state or messages ever pass through it — those go P2P over WebRTC.
-  supabase: { url: '', anonKey: '' },
+  // Ships with a shared default project so multiplayer works out of the box;
+  // the anon key is public by design (row-level security guards the data) and
+  // can be overridden in Settings → Connection setup.
+  supabase: {
+    url: 'https://aqifzekdejwwsaptupem.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxaWZ6ZWtkZWp3d3NhcHR1cGVtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwMTE3MjgsImV4cCI6MjA5ODU4NzcyOH0.QdPNyzA59agtjurIHP_7cKVUw45sTm9bz4_Ln1RBRug'
+  },
   // TURN relay used only when a direct P2P connection can't be established.
   turn: { urls: '', username: '', credential: '' }
 };
@@ -67,7 +73,17 @@ const DEFAULTS = {
 function load() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const cfg = { ...DEFAULTS, ...JSON.parse(raw) };
+    // Backfill the shared Supabase project for configs saved by older builds
+    // (which persisted empty credentials) so multiplayer works without setup.
+    const sb = cfg.supabase || {};
+    if (!sb.url || !sb.anonKey) {
+      cfg.supabase = {
+        url: sb.url || DEFAULTS.supabase.url,
+        anonKey: sb.anonKey || DEFAULTS.supabase.anonKey
+      };
+    }
+    return cfg;
   } catch {
     return { ...DEFAULTS };
   }

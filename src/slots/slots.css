@@ -114,17 +114,11 @@ body {
   font-size: 13px;
 }
 
-.muted {
-  color: rgba(255, 255, 255, 0.55);
-  font-weight: 500;
-}
-
-.rowicon {
+.hint {
   flex: 0 0 auto;
-  width: 28px;
-  text-align: center;
-  font-size: 15px;
-  line-height: 1;
+  font: 400 10px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 4px 6px 2px;
 }
 
 hr.sep {

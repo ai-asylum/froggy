@@ -1169,14 +1169,15 @@ function openSlotPicker(index) {
     slotPickerWin.close();
     slotPickerWin = null;
   }
-  const count = apps.list().filter((a) => a.installed).length;
-  const slotId = (config.load().slots || [])[index];
-  const slotApp = slotId ? apps.get(slotId) : null;
-  const hasSettings = !!(slotApp && slotApp.settingsView);
+  const installed = apps.list().filter((a) => a.installed);
+  const count = installed.length;
+  // The right-click hint line shows when at least one app has a settings screen.
+  const hasSettingsHint = installed.some((a) => a.settingsView);
   const W = 250;
-  // header + one row per app + (the app-settings row when the slot's app has
-  // settings) + padding. Clearing a slot is done by clicking its current app.
-  const H = 30 + count * 42 + (hasSettings ? 42 : 0) + 24;
+  // header + one row per app + (the right-click hint line when shown) + padding.
+  // Clearing a slot is done by clicking its current app; app settings are
+  // reached by right-clicking an app row.
+  const H = 30 + count * 42 + (hasSettingsHint ? 22 : 0) + 24;
   const b = petUrl();
   const area = b
     ? screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea

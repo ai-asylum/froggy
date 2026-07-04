@@ -1,15 +1,22 @@
 // The slot picker popover. Opened by clicking an empty slot on the frog, or by
-// long-pressing any slot (right-click jumps straight to the slotted app's
-// settings). It lists every installed app so you can drop one into the slot,
-// clear the slot, or jump straight to the settings of the app currently in the
-// slot. Closes on blur (handled in main), and after any choice.
+// long-pressing any slot. It lists every installed app so you can drop one into
+// the slot or clear it. Right-clicking an app row jumps straight to that app's
+// settings screen (for apps that have one). Closes on blur (handled in main),
+// and after any choice.
 
 const params = new URLSearchParams(location.search);
 const slotIndex = Number(params.get('index') || 0);
 
 const listEl = document.getElementById('list');
-const manageEl = document.getElementById('manage');
+const hintEl = document.getElementById('hint');
 const titleEl = document.getElementById('title');
+
+// Open an app's settings screen from a right-click, then dismiss the picker.
+function openAppSettings(app) {
+  if (!app || !app.settingsView) return;
+  window.api.send('slots:open-app-settings', app.settingsView);
+  window.close();
+}
 
 function iconTile(app) {
   const icon = document.createElement('span');
@@ -19,17 +26,15 @@ function iconTile(app) {
   return icon;
 }
 
-// The app whose settings the "App settings" row opens (the one in this slot).
-let currentApp = null;
-
 async function render() {
   const { slots, apps } = await window.api.invoke('slots:context');
   const currentId = slots[slotIndex] || null;
-  currentApp = (apps || []).find((a) => a.id === currentId) || null;
   titleEl.textContent = currentId ? 'Change slot app' : 'Add an app to this slot';
 
+  const installed = (apps || []).filter((a) => a.installed);
+
   listEl.innerHTML = '';
-  for (const app of (apps || []).filter((a) => a.installed)) {
+  for (const app of installed) {
     const otherSlot = slots.findIndex((id, i) => id === app.id && i !== slotIndex);
 
     const row = document.createElement('button');
@@ -56,7 +61,6 @@ async function render() {
       check.className = 'check';
       check.textContent = '\u2713';
       row.append(check);
-      row.title = 'Click to remove from slot';
     } else if (otherSlot !== -1) {
       const badge = document.createElement('span');
       badge.className = 'onfrog';
@@ -64,25 +68,27 @@ async function render() {
       row.append(badge);
     }
 
+    const removeHint = app.id === currentId ? 'Click to remove from slot' : 'Click to add to slot';
+    row.title = app.settingsView ? `${removeHint} \u00b7 right-click for settings` : removeHint;
+
     // Clicking the current app clears the slot; any other app fills it.
     row.addEventListener('click', () => choose(app.id === currentId ? null : app.id));
+    // Right-click opens the app's own settings screen (if it has one).
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openAppSettings(app);
+    });
     listEl.appendChild(row);
   }
 
-  // "App settings" only makes sense when the slot holds an app that has a
-  // settings screen; otherwise there's nothing to configure.
-  manageEl.hidden = !(currentApp && currentApp.settingsView);
+  // Show the right-click hint only when at least one listed app has settings.
+  hintEl.hidden = !installed.some((a) => a.settingsView);
 }
 
 function choose(appId) {
   window.api.invoke('slots:set', { index: slotIndex, appId }).then(() => window.close());
 }
 
-manageEl.addEventListener('click', () => {
-  if (!currentApp || !currentApp.settingsView) return;
-  window.api.send('slots:open-app-settings', currentApp.settingsView);
-  window.close();
-});
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') window.close();
 });
