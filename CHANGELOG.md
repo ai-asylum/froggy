@@ -2,10 +2,15 @@
 
 All notable changes to Froggy are documented here. Dates are in UTC.
 
-## [Unreleased]
+## [1.3.0] - 2026-07-17
+
+### Added
+
+- **A friendly Accessibility permission card (macOS).** Right after you name your frog, a small card explains that Froggy watches for keystrokes so your frog hops as you type — and makes clear it only counts key presses, never reading or storing what you type. One click grants access; "Maybe later" skips it. Upgrading users who never granted it get asked once, too.
 
 ### Fixed
 
+- **macOS no longer nags for Accessibility on every launch.** Froggy used to try to start its global key-hop hook on every boot, which made macOS pop the Accessibility prompt each time it wasn't granted. It now checks the permission first and only starts the hook once it's been granted (lighting up in the same session, no restart needed).
 - **No more stray pixel line above the frog on squish.** Sprite frames are now pre-sliced into their own tiles instead of being sampled out of the packed sheet, so scaling a squish frame no longer bleeds a sliver of the neighbouring frame in above the frog's head.
 
 ## [1.2.0] - 2026-07-17
@@ -36,5 +41,5 @@ All notable changes to Froggy are documented here. Dates are in UTC.
 - **Frogs now correctly float over fullscreen apps.** Fixed a typo (`visibleOnFullScreenScreen` → `visibleOnFullScreen`) in the always-on-top options across every Froggy window, so frogs and popups actually appear over fullscreen apps' Spaces.
 - **Incoming friend requests now grab attention like app notifications.** When an invite arrives the frog leaps + dances and flashes the friend icon in place of its app buttons (the icon existed but was never triggered); previously it only did a single quiet dance. Open friends panels also refresh immediately, and sending an invite now shows its "pending" row right away instead of waiting for the next refresh.
 
+[1.3.0]: https://github.com/ai-asylum/froggy/releases/tag/v1.3.0
 [1.2.0]: https://github.com/ai-asylum/froggy/releases/tag/v1.2.0
-   ffwwfwf

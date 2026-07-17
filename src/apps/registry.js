@@ -12,7 +12,10 @@
 //      inline SVG icon (a single <path> is easiest).
 //   3. Wire up whatever windows / IPC / behaviour it needs in main.js.
 //   4. If it has settings, add `settingsView: '<id>'` and a matching view in
-//      the settings window.
+//      the settings window, plus a `settings: require('./<id>/settings')`
+//      module declaring its defaults (see pomodoro/settings.js). Its values are
+//      persisted under `apps.<id>` in the config; read/write them with
+//      config.loadApp('<id>') / config.saveApp('<id>', patch).
 //
 // `icon` is raw SVG markup rendered inside a 24x24 viewBox tile.
 
@@ -45,6 +48,7 @@ const APPS = [
     dir: 'pomodoro',
     installed: true,
     settingsView: 'pomodoro',
+    settings: require('./pomodoro/settings'),
     icon: '<path fill="none" stroke="currentColor" stroke-width="2" d="M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 9v4l2.5 2.5M9 3h6"/>'
   },
   {
@@ -55,6 +59,7 @@ const APPS = [
     dir: 'water',
     installed: true,
     settingsView: 'water',
+    settings: require('./water/settings'),
     icon: '<path fill="currentColor" d="M12 2.5S5.5 10 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 10 12 2.5 12 2.5z"/>'
   },
   {
@@ -65,6 +70,7 @@ const APPS = [
     dir: 'countdown',
     installed: true,
     settingsView: 'countdown',
+    settings: require('./countdown/settings'),
     icon: '<path fill="currentColor" d="M6 2a1 1 0 0 0 0 2h1v3.6a4 4 0 0 0 1.79 3.33L11 12l-2.21 1.07A4 4 0 0 0 7 16.4V20H6a1 1 0 1 0 0 2h12a1 1 0 1 0 0-2h-1v-3.6a4 4 0 0 0-1.79-3.33L13 12l2.21-1.07A4 4 0 0 0 17 7.6V4h1a1 1 0 1 0 0-2H6zm3 2h6v3.6a2 2 0 0 1-.9 1.67L12 10.6l-2.1-1.33A2 2 0 0 1 9 7.6V4z"/>'
   }
 ];

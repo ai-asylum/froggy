@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const apps = require('./apps/registry');
 
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 
@@ -28,12 +29,11 @@ const DEFAULTS = {
   // so they follow you when you switch desktops. When off, each frog stays on
   // the desktop it's currently on. macOS-only in the UI; harmless elsewhere.
   allDesktops: false,
-  // Pomodoro app: focus / break lengths in minutes.
-  pomodoro: { workMinutes: 25, breakMinutes: 5 },
-  // Water reminder app: how often to nudge, and what to say.
-  water: { intervalMinutes: 60, message: 'Time to drink some water!' },
-  // Countdown app: a one-shot timer length + the message shown when it ends.
-  countdown: { minutes: 10, message: 'Time\u2019s up!' },
+  // Per-app settings, keyed by app id (e.g. `apps.pomodoro`). Each app declares
+  // its own defaults in src/apps/<id>/settings.js and reads/writes them via
+  // config.loadApp(id) / config.saveApp(id, patch); only overrides are stored
+  // here, so this stays empty until an app's settings are changed.
+  apps: {},
   // Quick-launch slots. The first three are the arc buttons around the frog
   // (left / top / right); the fourth is the frog itself, shown as a badge on its
   // body. Each entry is an app id (from src/apps/registry.js) or null for an
@@ -47,6 +47,9 @@ const DEFAULTS = {
   // Author handle written into note frontmatter.
   author: 'ruben.gres',
   autoLaunch: true,
+  // Whether we've already shown the macOS Accessibility permission card. Keeps
+  // the ask to a single, one-time prompt instead of every launch.
+  askedAccessibility: false,
   // When the destination folder is a git repo, commit + push after saving.
   autoPush: false,
 
@@ -77,6 +80,30 @@ const DEFAULTS = {
   turn: { urls: '', username: '', credential: '' }
 };
 
+// The defaults an app declares in src/apps/<id>/settings.js, surfaced via the
+// registry. Empty for apps that don't persist any settings.
+function appDefaults(id) {
+  const a = apps.get(id);
+  return a && a.settings && a.settings.defaults ? { ...a.settings.defaults } : {};
+}
+
+// Older builds stored each app's settings as a top-level key (e.g. `pomodoro`).
+// Fold any of those into the namespaced `apps` section and drop the old keys, so
+// on disk every app's settings live together under one `apps` object. Existing
+// (namespaced) values win over the legacy ones.
+const LEGACY_APP_KEYS = ['pomodoro', 'countdown', 'water'];
+function normalizeApps(cfg) {
+  const appsCfg = { ...(cfg.apps || {}) };
+  for (const id of LEGACY_APP_KEYS) {
+    if (cfg[id] && typeof cfg[id] === 'object') {
+      appsCfg[id] = { ...cfg[id], ...(appsCfg[id] || {}) };
+    }
+    delete cfg[id];
+  }
+  cfg.apps = appsCfg;
+  return cfg;
+}
+
 function load() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
@@ -90,9 +117,9 @@ function load() {
         anonKey: sb.anonKey || DEFAULTS.supabase.anonKey
       };
     }
-    return cfg;
+    return normalizeApps(cfg);
   } catch {
-    return { ...DEFAULTS };
+    return normalizeApps({ ...DEFAULTS });
   }
 }
 
@@ -105,6 +132,27 @@ function save(patch) {
     console.error('Failed to save config:', err);
   }
   return next;
+}
+
+// One app's settings, its declared defaults filled in for anything unset.
+function loadApp(id) {
+  const cfg = load();
+  return { ...appDefaults(id), ...((cfg.apps || {})[id] || {}) };
+}
+
+// Persist a patch for a single app's settings, leaving every other app (and the
+// global settings) untouched. Returns the full, normalized config.
+function saveApp(id, patch) {
+  const cfg = load();
+  const appsCfg = { ...(cfg.apps || {}) };
+  appsCfg[id] = { ...(appsCfg[id] || {}), ...(patch || {}) };
+  return save({ apps: appsCfg });
+}
+
+// Rewrite the config once in the normalized shape, folding any legacy top-level
+// per-app keys into `apps`. Safe to call on every launch; a no-op once migrated.
+function migrate() {
+  return save({});
 }
 
 // Crockford-style base32 without ambiguous characters (no I, L, O, U).
@@ -137,6 +185,9 @@ function ensureIdentity() {
 module.exports = {
   load,
   save,
+  loadApp,
+  saveApp,
+  migrate,
   ensureIdentity,
   generateCode,
   normalizeCode,

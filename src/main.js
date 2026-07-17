@@ -7,7 +7,9 @@ const {
   Tray,
   Menu,
   nativeImage,
-  Notification
+  Notification,
+  systemPreferences,
+  shell
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -137,6 +139,8 @@ let REMOTE_H = Math.round(BASE_REMOTE_H * petScale);
 let netWin = null; // hidden helper renderer hosting the WebRTC mesh
 let messageWin = null; // the "speak to this friend" DM composer
 let nameWin = null; // first-run "name your frog" popup
+let permsWin = null; // first-run Accessibility permission card (macOS)
+let nameSaved = false; // set once the FTUE name is saved, so we know to ask next
 let friendsWin = null; // the friends panel
 let slotPickerWin = null; // the "pick an app for this frog slot" popover
 let pendingSlotIndex = 0; // which slot the open picker is editing
@@ -255,12 +259,12 @@ function openInputWindow() {
   let x = primary.x + primary.width - W - MARGIN;
   let y = primary.y + MARGIN + PET_H;
   if (b) {
-    // Prefer to sit just below the frog, nudged so it stays on screen.
-    // Discount the transparent pad below the frog so we hug its feet, not the
+    // Prefer to sit just above the frog, nudged so it stays on screen.
+    // Discount the transparent pad below the frog so we hug its head, not the
     // (now taller) window's edge.
     x = Math.min(Math.max(b.x + b.width / 2 - W / 2, primary.x), primary.x + primary.width - W);
-    y = b.y + b.height - PET_BOTTOM_PAD - 10;
-    if (y + H > primary.y + primary.height) y = b.y - H + 10; // flip above if no room
+    y = b.y - H + 10;
+    if (y < primary.y) y = b.y + b.height - PET_BOTTOM_PAD - 10; // flip below if no room
   }
 
   inputWin = new BrowserWindow({
@@ -1097,6 +1101,12 @@ function openNameWindow() {
     nameWin = null;
     // Naming aborted/finished: hand the frog back to the user.
     unlockPetFromNaming();
+    // Only after a real "Hop In" (not a quit/escape) do we ask for the key-hop
+    // permission, so first-run flows straight from naming into the ask.
+    if (nameSaved) {
+      nameSaved = false;
+      maybePromptAccessibility({ force: true });
+    }
   });
 
   // Perch the real (transparent) frog on top of the naming card as a live
@@ -1141,6 +1151,54 @@ function unlockPetFromNaming() {
     y: wa.y + MARGIN,
     width: PET_W,
     height: PET_H
+  });
+}
+
+// Ask for Accessibility permission — but only where it's both needed (macOS)
+// and not already granted, and never more than once. `force` bypasses the
+// once-only guard for the FTUE hand-off straight after naming.
+function maybePromptAccessibility(opts = {}) {
+  if (process.platform !== 'darwin') return;
+  if (hasAccessibilityPermission()) return;
+  if (!opts.force && config.load().askedAccessibility) return;
+  config.save({ askedAccessibility: true });
+  openPermsWindow();
+}
+
+// First-run card explaining why Froggy wants Accessibility access (global key
+// hops) and letting the user grant it in one click.
+function openPermsWindow() {
+  if (permsWin) {
+    permsWin.show();
+    permsWin.focus();
+    return;
+  }
+  const W = 320;
+  const H = 206;
+  const area = screen.getPrimaryDisplay().workArea;
+  const px = Math.round(area.x + (area.width - W) / 2);
+  const py = Math.round(area.y + (area.height - H) / 2);
+  permsWin = new BrowserWindow({
+    width: W,
+    height: H,
+    x: px,
+    y: py,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  permsWin.setAlwaysOnTop(true, 'screen-saver');
+  permsWin.loadFile(path.join(__dirname, 'perms', 'index.html'));
+  permsWin.on('closed', () => {
+    permsWin = null;
   });
 }
 
@@ -1346,11 +1404,44 @@ function openSlotPicker(index) {
 // ---------------------------------------------------------------------------
 // Global keyboard hook -> small hop
 // ---------------------------------------------------------------------------
+
+// macOS only grants global key/mouse capture to apps trusted for Accessibility.
+// Check without ever prompting so a launch never surfaces a system dialog on its
+// own (that's what the first-run permission card is for). Every other platform
+// is treated as granted.
+function hasAccessibilityPermission() {
+  if (process.platform !== 'darwin') return true;
+  try {
+    return systemPreferences.isTrustedAccessibilityClient(false);
+  } catch {
+    return true;
+  }
+}
+
+// Deep-link to the Accessibility pane in System Settings so the user can flip
+// the toggle for Froggy.
+function openAccessibilitySettings() {
+  if (process.platform !== 'darwin') return;
+  shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+  );
+}
+
+let keyboardHookStarted = false;
+
 function startKeyboardHook() {
   // Wayland can't do global key hooks; fall back to watching the cursor so the
   // frog still reacts to activity (and we avoid libuiohook's Wayland crashes).
   if (IS_WAYLAND) {
     startMouseActivityWatch();
+    return;
+  }
+  if (keyboardHookStarted) return;
+  // On macOS, starting the hook without Accessibility permission makes the OS
+  // pop its own prompt on every single launch. Skip until the user has granted
+  // it (the first-run permission card, or a later launch, wires this up).
+  if (!hasAccessibilityPermission()) {
+    console.warn('Accessibility permission not granted yet; key hops disabled.');
     return;
   }
   let uIOhook;
@@ -1376,6 +1467,7 @@ function startKeyboardHook() {
     uIOhook.on('keydown', onGlobalInput);
     uIOhook.on('mousedown', onGlobalInput);
     uIOhook.start();
+    keyboardHookStarted = true;
     app.on('will-quit', () => {
       try {
         uIOhook.stop();
@@ -1384,6 +1476,24 @@ function startKeyboardHook() {
   } catch (err) {
     console.warn('Failed to start keyboard hook (grant Accessibility permission):', err.message);
   }
+}
+
+// After the user grants Accessibility, poll briefly so the key hops light up in
+// the same session instead of only after a restart. Gives up quietly if the
+// permission is never granted.
+function watchForAccessibilityGrant() {
+  if (process.platform !== 'darwin' || keyboardHookStarted) return;
+  let tries = 0;
+  const timer = setInterval(() => {
+    tries += 1;
+    if (hasAccessibilityPermission()) {
+      clearInterval(timer);
+      startKeyboardHook();
+    } else if (tries >= 60) {
+      // ~2 minutes at 2s intervals; stop polling and pick it up next launch.
+      clearInterval(timer);
+    }
+  }, 2000);
 }
 
 // Wayland fallback for the keyboard hook: there's no global key capture, but
@@ -1516,7 +1626,7 @@ function frogAlert() {
 }
 
 const pomodoro = createPomodoro({
-  getDurations: () => config.load().pomodoro || {},
+  getDurations: () => config.loadApp('pomodoro'),
   onTick: (state) => pushPomodoro(state),
   onPhaseChange: (phase) => {
     markActivity();
@@ -1563,7 +1673,7 @@ function fireWaterReminder(message) {
 }
 
 const waterReminder = createReminder({
-  getConfig: () => config.load().water || {},
+  getConfig: () => config.loadApp('water'),
   onRemind: fireWaterReminder
 });
 
@@ -1601,7 +1711,7 @@ function fireCountdownDone(message, color) {
 }
 
 const countdown = createCountdown({
-  getConfig: () => ({ ...(config.load().countdown || {}), color: countdownColor() }),
+  getConfig: () => ({ ...config.loadApp('countdown'), color: countdownColor() }),
   onTick: (state) => pushCountdown(state),
   onDone: fireCountdownDone
 });
@@ -1800,6 +1910,21 @@ function registerIpc() {
   // The Applications screen in settings asks for the list of installed apps.
   ipcMain.handle('apps:list', () => apps.list());
 
+  // --- Per-app settings ----------------------------------------------------
+  // Each app's settings live under `apps.<id>` in the config (defaults declared
+  // in src/apps/<id>/settings.js). These let a settings screen read/write one
+  // app's settings in isolation, without touching global config or other apps.
+  ipcMain.handle('app-settings:get', (_e, id) => config.loadApp(String(id || '')));
+  ipcMain.handle('app-settings:set', (_e, { id, patch } = {}) => {
+    const appId = String(id || '');
+    config.saveApp(appId, patch || {});
+    // Apps with a running background schedule react to their new settings; the
+    // timer apps (pomodoro/countdown) re-read their durations on the next start,
+    // so nothing to do there.
+    if (appId === 'water') waterReminder.reschedule();
+    return config.loadApp(appId);
+  });
+
   // --- Pomodoro app --------------------------------------------------------
   // The cycle is driven by the frog: the slot toggles it (pet:launch-slot ->
   // togglePomodoro) and a tap advances a finished phase (pet:click). The pet
@@ -1824,13 +1949,13 @@ function registerIpc() {
 
   // Fire the end-of-countdown alert right now so you can preview it.
   ipcMain.handle('countdown:test', () => {
-    const message = String((config.load().countdown || {}).message || '').trim() || 'Time\u2019s up!';
+    const message = String(config.loadApp('countdown').message || '').trim() || 'Time\u2019s up!';
     fireCountdownDone(message, countdownColor());
   });
 
   // Fire a water reminder right now so you can preview the notification.
   ipcMain.handle('water:test', () => {
-    const message = String((config.load().water || {}).message || '').trim() || 'Time to drink some water!';
+    const message = String(config.loadApp('water').message || '').trim() || 'Time to drink some water!';
     fireWaterReminder(message);
   });
 
@@ -1879,7 +2004,6 @@ function registerIpc() {
       applyAllDesktops(petWin);
       for (const w of remoteWins.values()) applyAllDesktops(w);
     }
-    if (Object.prototype.hasOwnProperty.call(p, 'water')) waterReminder.reschedule();
     // Share your new skin so friends' copies of your frog update, even offline.
     if (Object.prototype.hasOwnProperty.call(p, 'color')) {
       signaling.publishProfile(next.color);
@@ -1928,6 +2052,19 @@ function registerIpc() {
   ipcMain.on('pet:test-jump', () => nag());
 
   ipcMain.on('app:quit', () => quitApp());
+
+  // First-run permission card: fire the native macOS prompt and open the
+  // Accessibility pane, then watch for the grant so key hops light up without a
+  // restart. No-op on platforms that don't gate global input.
+  ipcMain.on('perms:grant', () => {
+    if (process.platform !== 'darwin') return;
+    try {
+      // Passing true asks macOS to show its own "allow Accessibility" prompt.
+      systemPreferences.isTrustedAccessibilityClient(true);
+    } catch {}
+    openAccessibilitySettings();
+    watchForAccessibilityGrant();
+  });
 
   ipcMain.handle('sprite:get', (_e, color) => {
     try {
@@ -2052,6 +2189,9 @@ function registerIpc() {
       const next = config.save(patch);
       if (petWin) petWin.webContents.send('config:updated', next);
     }
+    // Remember this was a genuine FTUE completion so closing the name card can
+    // segue into the Accessibility permission ask (rather than a quit/escape).
+    if (n) nameSaved = true;
   });
 
   // First-run: live-preview a color choice on the perched frog.
@@ -2153,6 +2293,7 @@ function registerIpc() {
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.hide();
   config.ensureIdentity();
+  config.migrate(); // fold any legacy per-app keys into the `apps` section
   registerIpc();
   createTray();
   createPetWindow();
@@ -2162,7 +2303,13 @@ app.whenReady().then(() => {
   startSleepWatch();
   startNetworking();
   waterReminder.reschedule();
-  if (!config.load().displayName) openNameWindow();
+  if (!config.load().displayName) {
+    openNameWindow();
+  } else {
+    // Already named (upgrading users): ask once for the key-hop permission if we
+    // never have, instead of the old behaviour of prompting on every launch.
+    maybePromptAccessibility();
+  }
 
   // Quietly check GitHub for a newer release a few seconds after launch, once
   // things have settled. Stays silent when up to date or offline.

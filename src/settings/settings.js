@@ -516,8 +516,8 @@ window.api.on('friends:presence', ({ id, online }) => {
 const pomoWorkEl = document.getElementById('pomo-work');
 const pomoBreakEl = document.getElementById('pomo-break');
 
-function loadPomodoro() {
-  const p = state.pomodoro || {};
+async function loadPomodoro() {
+  const p = await window.api.invoke('app-settings:get', 'pomodoro');
   pomoWorkEl.value = Math.max(1, Number(p.workMinutes) || 25);
   pomoBreakEl.value = Math.max(1, Number(p.breakMinutes) || 5);
 }
@@ -531,8 +531,9 @@ async function savePomodoro() {
   if (b > 60) b = 60;
   pomoWorkEl.value = w;
   pomoBreakEl.value = b;
-  state = await window.api.invoke('settings:set', {
-    pomodoro: { workMinutes: w, breakMinutes: b }
+  await window.api.invoke('app-settings:set', {
+    id: 'pomodoro',
+    patch: { workMinutes: w, breakMinutes: b }
   });
   flash('Pomodoro updated');
 }
@@ -545,8 +546,8 @@ pomoBreakEl.addEventListener('change', savePomodoro);
 const countdownMinsEl = document.getElementById('countdown-minutes');
 const countdownMsgEl = document.getElementById('countdown-message');
 
-function loadCountdown() {
-  const c = state.countdown || {};
+async function loadCountdown() {
+  const c = await window.api.invoke('app-settings:get', 'countdown');
   countdownMinsEl.value = Math.max(1, Number(c.minutes) || 10);
   countdownMsgEl.value = c.message || '';
 }
@@ -557,8 +558,9 @@ async function saveCountdown() {
   if (mins > 600) mins = 600;
   countdownMinsEl.value = mins;
   const message = countdownMsgEl.value.trim() || 'Time\u2019s up!';
-  state = await window.api.invoke('settings:set', {
-    countdown: { minutes: mins, message }
+  await window.api.invoke('app-settings:set', {
+    id: 'countdown',
+    patch: { minutes: mins, message }
   });
   flash('Countdown updated');
 }
@@ -574,8 +576,8 @@ document.getElementById('countdown-test').addEventListener('click', async () => 
 const waterIntervalEl = document.getElementById('water-interval');
 const waterMessageEl = document.getElementById('water-message');
 
-function loadWater() {
-  const w = state.water || {};
+async function loadWater() {
+  const w = await window.api.invoke('app-settings:get', 'water');
   waterIntervalEl.value = Number(w.intervalMinutes) || 60;
   waterMessageEl.value = w.message || '';
 }
@@ -586,8 +588,9 @@ async function saveWater() {
   if (mins > 720) mins = 720;
   waterIntervalEl.value = mins;
   const message = waterMessageEl.value.trim() || 'Time to drink some water!';
-  state = await window.api.invoke('settings:set', {
-    water: { intervalMinutes: mins, message }
+  await window.api.invoke('app-settings:set', {
+    id: 'water',
+    patch: { intervalMinutes: mins, message }
   });
   flash('Reminder updated');
 }
