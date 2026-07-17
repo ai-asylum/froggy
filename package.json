@@ -55,7 +55,7 @@
       ]
     },
     "dmg": {
-      "title": "Froggy ${version}"
+      "title": "Froggy ${version} ${arch}"
     },
     "win": {
       "target": [
