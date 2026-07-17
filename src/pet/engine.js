@@ -124,21 +124,36 @@ function createEngine(canvas, opts = {}) {
   }
 
   // --- Sprite loading ------------------------------------------------------
-  let sheet = new Image();
+  // Frames are pre-sliced into their own isolated 16x16 canvases at load time,
+  // rather than sampled out of the packed sheet on every draw. Blitting a
+  // scaled sub-rect of the sheet bleeds a sliver of the neighbouring frame into
+  // the drawn frame's edges (a stray pixel line above the frog on squish), so
+  // slicing first leaves no neighbour to bleed in.
   let sheetReady = false;
-  let outlineSheet = null;
+  let frameTiles = []; // frame index -> its own 16x16 canvas
+  let outlineTiles = []; // same, as a white silhouette for the outline pass
 
-  function makeWhiteSilhouette(img) {
-    const c = document.createElement('canvas');
-    c.width = img.width;
-    c.height = img.height;
-    const x = c.getContext('2d');
-    x.imageSmoothingEnabled = false;
-    x.drawImage(img, 0, 0);
-    x.globalCompositeOperation = 'source-in';
-    x.fillStyle = '#ffffff';
-    x.fillRect(0, 0, c.width, c.height);
-    return c;
+  function sliceFrames(img, { white } = {}) {
+    const rows = Math.max(1, Math.round(img.height / FRAME));
+    const count = COLS * rows;
+    const tiles = [];
+    for (let i = 0; i < count; i++) {
+      const sx = (i % COLS) * FRAME;
+      const sy = Math.floor(i / COLS) * FRAME;
+      const c = document.createElement('canvas');
+      c.width = FRAME;
+      c.height = FRAME;
+      const x = c.getContext('2d');
+      x.imageSmoothingEnabled = false;
+      x.drawImage(img, sx, sy, FRAME, FRAME, 0, 0, FRAME, FRAME);
+      if (white) {
+        x.globalCompositeOperation = 'source-in';
+        x.fillStyle = '#ffffff';
+        x.fillRect(0, 0, FRAME, FRAME);
+      }
+      tiles[i] = c;
+    }
+    return tiles;
   }
 
   let currentColor = null;
@@ -149,9 +164,9 @@ function createEngine(canvas, opts = {}) {
     if (!dataUrl) return;
     const img = new Image();
     img.onload = () => {
-      sheet = img;
+      frameTiles = sliceFrames(img);
+      outlineTiles = sliceFrames(img, { white: true });
       sheetReady = true;
-      outlineSheet = makeWhiteSilhouette(img);
     };
     img.src = dataUrl;
     if (!silent) onEvent({ type: 'color', color });
@@ -338,10 +353,10 @@ function createEngine(canvas, opts = {}) {
 
   // --- Drawing -------------------------------------------------------------
   function drawFrame(frameIndex, yOffset, deform, alpha) {
-    const sx = (frameIndex % COLS) * FRAME;
-    const sy = Math.floor(frameIndex / COLS) * FRAME;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!sheetReady) return;
+    const tile = frameTiles[frameIndex];
+    if (!tile) return;
 
     ctx.globalAlpha = typeof alpha === 'number' ? alpha : 1;
     const s = deform || 0;
@@ -353,14 +368,15 @@ function createEngine(canvas, opts = {}) {
     const drawX = REST_X - (drawW - DRAW) / 2;
     const drawY = baseline - drawH - yOffset;
 
-    if (outlineSheet) {
+    const outline = outlineTiles[frameIndex];
+    if (outline) {
       const ox = (drawW / FRAME) * OUTLINE_WIDTH;
       const oy = (drawH / FRAME) * OUTLINE_WIDTH;
       for (const [dx, dy] of OUTLINE_OFFSETS) {
-        ctx.drawImage(outlineSheet, sx, sy, FRAME, FRAME, drawX + dx * ox, drawY + dy * oy, drawW, drawH);
+        ctx.drawImage(outline, drawX + dx * ox, drawY + dy * oy, drawW, drawH);
       }
     }
-    ctx.drawImage(sheet, sx, sy, FRAME, FRAME, drawX, drawY, drawW, drawH);
+    ctx.drawImage(tile, drawX, drawY, drawW, drawH);
     ctx.globalAlpha = 1;
   }
 

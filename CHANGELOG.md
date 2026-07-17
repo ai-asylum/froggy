@@ -2,6 +2,12 @@
 
 All notable changes to Froggy are documented here. Dates are in UTC.
 
+## [Unreleased]
+
+### Fixed
+
+- **No more stray pixel line above the frog on squish.** Sprite frames are now pre-sliced into their own tiles instead of being sampled out of the packed sheet, so scaling a squish frame no longer bleeds a sliver of the neighbouring frame in above the frog's head.
+
 ## [1.2.0] - 2026-07-17
 
 ### Added
@@ -31,3 +37,4 @@ All notable changes to Froggy are documented here. Dates are in UTC.
 - **Incoming friend requests now grab attention like app notifications.** When an invite arrives the frog leaps + dances and flashes the friend icon in place of its app buttons (the icon existed but was never triggered); previously it only did a single quiet dance. Open friends panels also refresh immediately, and sending an invite now shows its "pending" row right away instead of waiting for the next refresh.
 
 [1.2.0]: https://github.com/ai-asylum/froggy/releases/tag/v1.2.0
+   ffwwfwf
