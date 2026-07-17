@@ -31,11 +31,28 @@ body {
   image-rendering: pixelated;
 }
 
-.nametag {
+/* Hover overlay: name, the room the frog is linked to, and (for non-friends)
+   an "add friend" button — stacked above the frog and revealed together. */
+.meta {
   position: absolute;
   left: 50%;
-  top: 52px;
+  top: 34px;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  max-width: 116px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.meta.visible {
+  opacity: 1;
+}
+
+.nametag {
   max-width: 112px;
   padding: 1px 7px;
   font: 600 10px -apple-system, BlinkMacSystemFont, sans-serif;
@@ -46,13 +63,91 @@ body {
   background: rgba(30, 30, 40, 0.72);
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
 }
 
-.nametag.visible {
-  opacity: 1;
+/* The room chip only shows when the frog is linked to a room. */
+.roomtag {
+  display: none;
+  max-width: 112px;
+  padding: 2px 8px;
+  font: 600 12px -apple-system, BlinkMacSystemFont, sans-serif;
+  color: rgba(255, 255, 255, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(46, 120, 90, 0.82);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+.roomtag.visible {
+  display: block;
+}
+
+/* Icon-only "add friend" button (round). Hidden for frogs you're already
+   friends with; color alone conveys pending / incoming state. */
+.addfriend {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 6px;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(58, 122, 233, 0.94);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.addfriend.visible {
+  display: inline-flex;
+}
+/* Hover feedback is driven by the `.hot` class (set from the same JS hit-test
+   that toggles interactivity) as well as the native `:hover`, because CSS
+   `:hover` is unreliable on a click-through overlay window. */
+.addfriend:hover,
+.addfriend.hot {
+  background: rgba(48, 108, 214, 1);
+  transform: scale(1.18);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(88, 146, 245, 0.45);
+}
+.addfriend:active {
+  transform: scale(0.92);
+}
+.addfriend.pending {
+  background: rgba(30, 30, 40, 0.72);
+  cursor: default;
+}
+.addfriend.pending:hover,
+.addfriend.pending.hot {
+  background: rgba(30, 30, 40, 0.72);
+  transform: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+/* Click confirmation: a quick pop while the invite is on its way (the pill
+   flips to the grey "invited" state once main echoes the new status back). */
+@keyframes addpop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.addfriend.sent {
+  animation: addpop 0.35s ease;
+}
+.addfriend.incoming {
+  background: rgba(46, 150, 90, 0.96);
+}
+.addfriend.incoming:hover,
+.addfriend.incoming.hot {
+  background: rgba(38, 132, 78, 1);
 }
 
 .bubble {

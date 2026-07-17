@@ -21,6 +21,13 @@ const DEFAULTS = {
   // Master switch: when off, every frog freezes to a static pose (no idle bob,
   // hops, dances, sleep, or squish) — both your frog and friends'.
   animations: true,
+  // When on, clicking your frog makes it squish — the same little charge/hop
+  // beat as typing. Purely local flair and stacks with whatever the tap does.
+  squishOnClick: false,
+  // macOS: keep your frog (and friends' frogs) visible on every desktop/Space,
+  // so they follow you when you switch desktops. When off, each frog stays on
+  // the desktop it's currently on. macOS-only in the UI; harmless elsewhere.
+  allDesktops: false,
   // Pomodoro app: focus / break lengths in minutes.
   pomodoro: { workMinutes: 25, breakMinutes: 5 },
   // Water reminder app: how often to nudge, and what to say.
@@ -34,7 +41,7 @@ const DEFAULTS = {
   slots: [null, 'journal', 'shout', null],
   // Whether the frog itself acts as the 4th quick-launch slot. When off, the
   // frog shows no badge and a tap falls back to opening the journal.
-  frogButton: true,
+  frogButton: false,
   // Position is stored so the frog reappears where you left it.
   position: null,
   // Author handle written into note frontmatter.

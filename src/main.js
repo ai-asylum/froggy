@@ -110,6 +110,15 @@ let tray = null;
 // the frog for a frog you can actually grab.
 const SUPPORTS_CLICK_THROUGH = process.platform !== 'linux';
 
+// Keep a frog window visible on every desktop/Space (so it follows you when you
+// switch desktops), or pin it to its current one — driven by the `allDesktops`
+// setting. `visibleOnFullScreen` lets it also float over fullscreen apps' spaces.
+function applyAllDesktops(win) {
+  if (!win || win.isDestroyed()) return;
+  const on = config.load().allDesktops !== false;
+  win.setVisibleOnAllWorkspaces(on, { visibleOnFullScreen: true });
+}
+
 // Global keyboard hooks (libuiohook) are fundamentally broken on Wayland: its
 // X11 XKB queries fail (dropping keys), and some setups even segfault on load.
 // Detect Wayland so we can skip the hook there and fall back to cursor polling.
@@ -194,7 +203,7 @@ function createPetWindow() {
 
   // Float above almost everything, including full-screen apps and other spaces.
   petWin.setAlwaysOnTop(true, 'screen-saver');
-  petWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  applyAllDesktops(petWin);
 
   // Track which display the pet is on so we can force a repaint when it crosses
   // to another monitor (macOS drops transparency otherwise -> white background).
@@ -272,7 +281,7 @@ function openInputWindow() {
     }
   });
   inputWin.setAlwaysOnTop(true, 'screen-saver');
-  inputWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  inputWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   inputWin.loadFile(path.join(__dirname, 'apps', 'journal', 'index.html'));
   inputWin.once('ready-to-show', () => {
     inputWin.webContents.send('input:init', { attention: attentionActive });
@@ -301,18 +310,29 @@ function openSettingsWindow(initialView) {
   }
   const W = 380;
   const H = 560;
-  // Center on whichever display the frog is currently on.
+  // Spawn beside the frog on whichever display it's on, falling back to the
+  // primary display's center when there's no frog yet.
   const b = petUrl();
   const area = b
     ? screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea
     : screen.getPrimaryDisplay().workArea;
+  let x = Math.round(area.x + (area.width - W) / 2);
+  let y = Math.round(area.y + (area.height - H) / 2);
+  if (b) {
+    // Pop the panel up centered on the frog, its bottom edge tucked just above
+    // the frog's feet, then clamp so it always stays fully on screen.
+    x = Math.round(b.x + b.width / 2 - W / 2);
+    x = Math.max(area.x, Math.min(x, area.x + area.width - W));
+    y = Math.round(b.y + b.height - PET_BOTTOM_PAD - H - MARGIN);
+    y = Math.max(area.y, Math.min(y, area.y + area.height - H));
+  }
   settingsWin = new BrowserWindow({
     width: W,
     height: H,
     minWidth: 340,
     minHeight: 320,
-    x: Math.round(area.x + (area.width - W) / 2),
-    y: Math.round(area.y + (area.height - H) / 2),
+    x,
+    y,
     frame: false,
     transparent: true,
     resizable: true,
@@ -433,8 +453,8 @@ function stopAttention() {
   if (petWin) petWin.webContents.send('attention:stop');
 }
 
-function bigJump() {
-  if (petWin) petWin.webContents.send('anim:jump');
+function bigJump(opts) {
+  if (petWin) petWin.webContents.send('anim:jump', opts);
 }
 
 // Any user activity resets the snooze timer and wakes the frog if it dozed off.
@@ -481,6 +501,25 @@ function friendColor(id) {
   const cfg = config.load();
   const f = (cfg.friends || []).find((x) => x.id === id);
   return (f && f.color) || null;
+}
+
+// The friendship state for a remote id: 'pending' | 'incoming' | 'accepted' |
+// null (a stranger sharing my room). Drives the frog's "add friend" pill.
+function friendStatus(id) {
+  const cfg = config.load();
+  const f = (cfg.friends || []).find((x) => x.id === id);
+  return (f && f.status) || null;
+}
+
+// Refresh a remote frog's hover overlay (room chip + friendship state) after
+// the room or the friendship changes, without respawning its window.
+function updateRemoteMeta(id) {
+  const w = remoteWins.get(id);
+  if (!w || w.isDestroyed()) return;
+  w.webContents.send('remote:meta', {
+    room: roomMembers.has(id) ? currentRoom : '',
+    status: friendStatus(id)
+  });
 }
 
 function saveFriendColor(id, color) {
@@ -628,7 +667,7 @@ function startNetworking() {
   // Rejoin the room we were in last session.
   if (cfg.room) {
     currentRoom = cfg.room;
-    signaling.joinRoom(cfg.room, { name: selfName(), color: cfg.color }, onRoomSync);
+    signaling.joinRoom(cfg.room, { name: selfName(), color: cfg.color }, onRoomSync, onRoomAction);
   }
 
   // Invite broadcasts are ephemeral, so a request sent while the other frog was
@@ -659,6 +698,7 @@ function handleIncomingRequest(fromId, fromName) {
     signaling.addPair(fromId);
     roomFrogIds.delete(fromId); // their frog is now owned by the friendship
     spawnRemoteFrog(fromId);
+    updateRemoteMeta(fromId); // drop the "add friend" pill now we're linked
     danceLocal();
     notify('Friend added', `${existing.label || fromName || 'Your friend'} — say hi!`);
     pushFriends();
@@ -673,10 +713,16 @@ function handleIncomingRequest(fromId, fromName) {
     config.save({ friends });
   }
 
-  // No modal — the frog dances for attention; clicking it opens the friends
-  // panel (see the pet:click handler) where the invite can be accepted.
-  danceLocal();
+  // If their frog is already on screen (a room member), flip its pill to
+  // "Accept" so the invite can be taken right there.
+  updateRemoteMeta(fromId);
+  // No modal — the frog leaps + dances for attention, and pushFriends →
+  // syncFrogNotify flashes the friend icon on it like an app notification;
+  // clicking the frog opens the friends panel (see the pet:click handler)
+  // where the invite can be accepted.
+  frogAlert();
   notify('Friend invite', `${fromName || 'Someone'} (${fromId}) wants to be friends.`);
+  pushFriends();
 }
 
 // They accepted my request → mutual. Their frog appears when they're online.
@@ -691,6 +737,7 @@ function handleFriendAccepted(fromId, fromName) {
   signaling.addPair(fromId);
   roomFrogIds.delete(fromId); // their frog is now owned by the friendship
   spawnRemoteFrog(fromId);
+  updateRemoteMeta(fromId); // drop the "add friend" pill now we're linked
   notify('Friend added', `${existing.label || 'Your friend'} accepted — say hi!`);
   pushFriends();
 }
@@ -757,6 +804,8 @@ function pushRoom() {
   };
   if (friendsWin) friendsWin.webContents.send('room:changed', payload);
   if (settingsWin) settingsWin.webContents.send('room:changed', payload);
+  // Keep each frog's hover overlay in step with the room it's linked to.
+  for (const id of remoteWins.keys()) updateRemoteMeta(id);
 }
 
 // Presence sync from the room channel: diff against what we knew — spawn a frog
@@ -805,6 +854,19 @@ function onRoomSync(members) {
   pushRoom();
 }
 
+// Shouts and frog "bounce" beats a roommate sent over the room channel. These
+// are the only frog events that reach non-friends who merely share your room;
+// private DMs are deliberately excluded. A friend who is also in the room
+// already receives these over their P2P link, so their room copy is dropped.
+const ROOM_ACTION_TYPES = new Set(['color', 'hop', 'jump', 'sleep', 'wake', 'idle', 'shout']);
+function onRoomAction(fromId, msg) {
+  if (!fromId || fromId === config.load().selfId) return;
+  if (!roomMembers.has(fromId)) return; // only people actually in our room
+  if (connected.has(fromId)) return; // a live P2P link already delivered it
+  if (!msg || !ROOM_ACTION_TYPES.has(msg.type)) return;
+  handlePeerData(fromId, msg);
+}
+
 function joinRoomLocal(name) {
   const cfg = config.load();
   if (!signaling.isConfigured(cfg)) {
@@ -816,7 +878,7 @@ function joinRoomLocal(name) {
   if (currentRoom) leaveRoomLocal({ silent: true }); // one room at a time
   currentRoom = room;
   config.save({ room });
-  signaling.joinRoom(room, { name: selfName(), color: cfg.color }, onRoomSync);
+  signaling.joinRoom(room, { name: selfName(), color: cfg.color }, onRoomSync, onRoomAction);
   pushRoom();
   return { ok: true, room };
 }
@@ -906,7 +968,7 @@ function spawnRemoteFrog(friendId, opts = {}) {
   // One level below the pet's 'screen-saver' so your own frog always renders
   // on top of every remote frog, while still floating above normal windows.
   win.setAlwaysOnTop(true, 'pop-up-menu');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  applyAllDesktops(win);
   if (SUPPORTS_CLICK_THROUGH) win.setIgnoreMouseEvents(true, { forward: true });
   win.setOpacity(typeof cfg.opacity === 'number' ? cfg.opacity : 1);
   win.loadFile(path.join(__dirname, 'pet', 'remote.html'), {
@@ -914,7 +976,12 @@ function spawnRemoteFrog(friendId, opts = {}) {
       id: friendId,
       label,
       color: opts.color || friendColor(friendId) || '',
-      scale: String(petScale)
+      scale: String(petScale),
+      // The room this frog is linked to (only set while it shares my room) and
+      // the friendship state, so the hover overlay can show the room + an
+      // "add friend" pill for strangers right away.
+      room: roomMembers.has(friendId) ? currentRoom : '',
+      status: friendStatus(friendId) || ''
     }
   });
   win.webContents.on('did-finish-load', () => {
@@ -988,9 +1055,9 @@ function sendToRemote(friendId, channel, payload) {
 }
 
 // The local frog does a happy little dance (a few hops).
-function danceLocal() {
+function danceLocal(opts) {
   markActivity();
-  if (petWin) petWin.webContents.send('anim:dance');
+  if (petWin) petWin.webContents.send('anim:dance', opts);
 }
 
 // First-run popup that asks the user to name their frog (sets displayName).
@@ -1114,7 +1181,7 @@ function openMessageWindow(friendId) {
     }
   });
   messageWin.setAlwaysOnTop(true, 'screen-saver');
-  messageWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  messageWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   messageWin.loadFile(path.join(__dirname, 'message', 'index.html'), {
     query: { id: friendId, label }
   });
@@ -1255,7 +1322,7 @@ function openSlotPicker(index) {
     }
   });
   slotPickerWin.setAlwaysOnTop(true, 'screen-saver');
-  slotPickerWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+  slotPickerWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   slotPickerWin.loadFile(path.join(__dirname, 'slots', 'index.html'), {
     query: { index: String(index) }
   });
@@ -1442,8 +1509,10 @@ function pushPomodoro(state) {
 // A phase's timer ran out: a big leap followed by a happy little dance to grab
 // attention, inviting a tap to roll into the next phase.
 function frogAlert() {
-  bigJump();
-  setTimeout(danceLocal, 260);
+  // A personal reminder: animate our own frog only, without broadcasting the
+  // beats to friends (their frogs shouldn't jump for our nag).
+  bigJump({ silent: true });
+  setTimeout(() => danceLocal({ silent: true }), 260);
 }
 
 const pomodoro = createPomodoro({
@@ -1560,11 +1629,45 @@ const shout = createShout({
   broadcast: (text) => {
     showLocalShout(text);
     if (netWin) netWin.webContents.send('mesh:broadcast', { type: 'shout', text });
+    // Roommates aren't P2P peers, so reach them over the room channel too.
+    signaling.broadcastRoom({ type: 'shout', text });
   },
   preloadPath: path.join(__dirname, 'preload.js'),
   margin: MARGIN,
   bottomPad: PET_BOTTOM_PAD
 });
+
+// Ease the pet window's opacity toward a target over a short duration. Used by
+// the hover handler to fade between full opacity and the configured setting.
+let petOpacityTimer = null;
+function animatePetOpacity(target) {
+  if (!petWin) return;
+  if (petOpacityTimer) {
+    clearInterval(petOpacityTimer);
+    petOpacityTimer = null;
+  }
+  const from = petWin.getOpacity();
+  if (Math.abs(target - from) < 0.001) {
+    petWin.setOpacity(target);
+    return;
+  }
+  const durationMs = 160;
+  const start = Date.now();
+  petOpacityTimer = setInterval(() => {
+    if (!petWin) {
+      clearInterval(petOpacityTimer);
+      petOpacityTimer = null;
+      return;
+    }
+    const t = Math.min(1, (Date.now() - start) / durationMs);
+    const eased = t * (2 - t); // easeOutQuad
+    petWin.setOpacity(from + (target - from) * eased);
+    if (t >= 1) {
+      clearInterval(petOpacityTimer);
+      petOpacityTimer = null;
+    }
+  }, 16);
+}
 
 // ---------------------------------------------------------------------------
 // IPC
@@ -1574,6 +1677,16 @@ function registerIpc() {
     if (!petWin) return;
     if (!SUPPORTS_CLICK_THROUGH) return; // stays interactive on Linux
     petWin.setIgnoreMouseEvents(!!ignore, { forward: true });
+  });
+
+  // On hover, snap the frog to full opacity (ignoring the transparency setting);
+  // on leave, ease back to the user's configured opacity. Animated with a short
+  // eased ramp so the change reads as a gentle fade rather than a hard toggle.
+  ipcMain.on('pet:hover', (_e, on) => {
+    if (!petWin) return;
+    const cfg = config.load();
+    const base = typeof cfg.opacity === 'number' ? cfg.opacity : 1;
+    animatePetOpacity(on ? 1 : base);
   });
 
   ipcMain.on('pet:move', (_e, pos) => {
@@ -1614,12 +1727,7 @@ function registerIpc() {
     // (A waiting journal nag is handled above via the notification system —
     // it registers as a pending notification whose tap opens the composer.)
     // Otherwise the frog is itself a slot (the 4th): a tap launches the app
-    // assigned to it. When the frog button is disabled, a tap falls back to
-    // opening the journal composer instead.
-    if (cfg.frogButton === false) {
-      openInputWindow();
-      return;
-    }
+    // assigned to it.
     const frogApp = (cfg.slots || [])[FROG_SLOT];
     if (frogApp) launchApp(frogApp);
     // Empty frog slot: a tap does nothing on purpose. The picker is opened by
@@ -1766,6 +1874,11 @@ function registerIpc() {
       for (const w of remoteWins.values()) w.setOpacity(op);
     }
     if (Object.prototype.hasOwnProperty.call(p, 'scale')) applyPetScale(next.scale);
+    // Keep the frogs on every desktop, or pin them to the current one.
+    if (Object.prototype.hasOwnProperty.call(p, 'allDesktops')) {
+      applyAllDesktops(petWin);
+      for (const w of remoteWins.values()) applyAllDesktops(w);
+    }
     if (Object.prototype.hasOwnProperty.call(p, 'water')) waterReminder.reschedule();
     // Share your new skin so friends' copies of your frog update, even offline.
     if (Object.prototype.hasOwnProperty.call(p, 'color')) {
@@ -1829,6 +1942,10 @@ function registerIpc() {
   // A local animation beat -> broadcast to every connected friend.
   ipcMain.on('net:local-event', (_e, msg) => {
     if (netWin) netWin.webContents.send('mesh:broadcast', msg);
+    // Let roommates (who have no P2P link) see the frog bounce too. The per-key
+    // squish pulse is skipped so we don't fire a broadcast on every keystroke —
+    // the actual hops/jumps still carry the movement.
+    if (msg && msg.type !== 'key') signaling.broadcastRoom(msg);
   });
 
   // Signaling relay from the mesh renderer out to the right peer.
@@ -1874,6 +1991,43 @@ function registerIpc() {
   ipcMain.on('remote:click', (_e, { id }) => {
     if (connected.has(id)) openMessageWindow(id);
   });
+  // "Add friend" on a frog's hover overlay: invite the owner (a room member you
+  // don't know yet) — or, if they already invited you, accept on the spot.
+  ipcMain.on('remote:add-friend', (_e, { id }) => {
+    const cfg = config.load();
+    if (!id || !signaling.isConfigured(cfg) || id === cfg.selfId) return;
+    const friends = [...(cfg.friends || [])];
+    const existing = friends.find((f) => f.id === id);
+    if (existing && existing.status === 'accepted') return;
+    const label = ((roomMembers.get(id) || {}).name || friendLabel(id) || '').trim();
+
+    // They already asked us → this is a mutual accept, link up immediately.
+    if (existing && existing.status === 'incoming') {
+      existing.status = 'accepted';
+      if (label && (!existing.label || existing.label === 'Friend')) existing.label = label;
+      config.save({ friends });
+      signaling.sendAccept(id, selfName());
+      signaling.addPair(id);
+      roomFrogIds.delete(id);
+      updateRemoteMeta(id);
+      pushFriends();
+      return;
+    }
+
+    // Re-sending a pending invite is harmless (e.g. they just came online).
+    if (existing && existing.status === 'pending') {
+      signaling.sendRequest(id, selfName());
+      updateRemoteMeta(id);
+      return;
+    }
+
+    friends.push({ id, label, status: 'pending' });
+    config.save({ friends });
+    signaling.sendRequest(id, selfName());
+    updateRemoteMeta(id);
+    pushFriends();
+  });
+
   // The X on a friend's frog breaks the link (and removes you from theirs).
   // On a room-only frog it just hides the window locally — they stay in the
   // room (and in the members list) and reappear next time they rejoin.
@@ -1949,6 +2103,7 @@ function registerIpc() {
     if (!existing) friends.push({ id, label: String(label || '').trim(), status: 'pending' });
     config.save({ friends });
     signaling.sendRequest(id, selfName());
+    pushFriends(); // show the new pending row right away
     return { ok: true };
   });
 
@@ -1963,6 +2118,7 @@ function registerIpc() {
     signaling.sendAccept(id, selfName());
     signaling.addPair(id);
     roomFrogIds.delete(id); // their frog (if in the room) is now the friendship's
+    updateRemoteMeta(id); // drop the "add friend" pill on their frog
     pushFriends();
     return { ok: true };
   });

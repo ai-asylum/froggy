@@ -27,6 +27,26 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Pop open from the bottom (where the frog is) with a springy scale + fade. */
+  transform-origin: 50% 100%;
+  animation: cardpop 0.24s cubic-bezier(0.18, 0.9, 0.32, 1.4) both;
+}
+
+@keyframes cardpop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #card {
+    animation: none;
+  }
 }
 
 /* Drag the whole window by its header (buttons stay clickable). */
@@ -337,6 +357,47 @@ button.danger:hover {
 }
 .addfriend button {
   flex: 0 0 auto;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Primary invite/accept actions grow on hover and press in on click. */
+#addfriend,
+.accept {
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+#addfriend:hover,
+.accept:hover {
+  transform: scale(1.08);
+}
+#addfriend:active,
+.accept:active {
+  transform: scale(0.94);
+}
+#addfriend:disabled:hover,
+.accept:disabled:hover {
+  transform: none;
+  background: #4caf50;
+}
+
+/* Post-click confirmation on the Send button ("Sent ✓"). */
+@keyframes sentpop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+#addfriend.sent {
+  background: #2e9e55;
+  animation: sentpop 0.3s ease;
 }
 
 .friends {

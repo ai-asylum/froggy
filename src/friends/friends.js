@@ -73,8 +73,15 @@ function renderRoom() {
       add.className = 'accept';
       add.textContent = 'Add friend';
       add.addEventListener('click', async () => {
+        add.disabled = true;
+        add.textContent = 'Sending…';
         const res = await window.api.invoke('friends:add', { code: m.id, label: m.name });
-        if (!(res && res.ok)) statusEl.textContent = (res && res.error) || 'Could not send';
+        // On success the friends:changed push re-renders this row as "pending".
+        if (!(res && res.ok)) {
+          add.disabled = false;
+          add.textContent = 'Add friend';
+          statusEl.textContent = (res && res.error) || 'Could not send';
+        }
       });
       row.append(add);
     }
@@ -153,15 +160,24 @@ document.getElementById('copycode').addEventListener('click', async () => {
   } catch {}
 });
 
-document.getElementById('addfriend').addEventListener('click', async () => {
+const addFriendBtn = document.getElementById('addfriend');
+addFriendBtn.addEventListener('click', async () => {
+  if (addFriendBtn.classList.contains('sent')) return; // confirmation still showing
   const code = friendCodeEl.value.trim();
   if (!code) {
     friendCodeEl.focus();
     return;
   }
   const res = await window.api.invoke('friends:add', { code });
-  if (res && res.ok) friendCodeEl.value = '';
-  else statusEl.textContent = (res && res.error) || 'Could not send';
+  if (res && res.ok) {
+    friendCodeEl.value = '';
+    addFriendBtn.classList.add('sent');
+    addFriendBtn.textContent = 'Sent ✓';
+    setTimeout(() => {
+      addFriendBtn.classList.remove('sent');
+      addFriendBtn.textContent = 'Send';
+    }, 1400);
+  } else statusEl.textContent = (res && res.error) || 'Could not send';
 });
 
 displayNameEl.addEventListener('change', async () => {

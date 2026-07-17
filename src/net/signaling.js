@@ -177,7 +177,7 @@ function roomMemberList() {
 // Join (or switch to) a room. `onSync` fires with the full member list every
 // time anyone joins or leaves. Only one room at a time — joining leaves the
 // previous one.
-function joinRoom(name, meta, onSync) {
+function joinRoom(name, meta, onSync, onAction) {
   if (!client || !name) return false;
   leaveRoom();
   const channel = client.channel('room:' + name, {
@@ -188,6 +188,13 @@ function joinRoom(name, meta, onSync) {
   channel.on('presence', { event: 'sync' }, sync);
   channel.on('presence', { event: 'join' }, sync);
   channel.on('presence', { event: 'leave' }, sync);
+  // Shouts and frog "bounce" beats from roommates. Friends exchange these P2P;
+  // room members share only this channel, so the same lightweight events ride
+  // it here. It never carries private DMs.
+  channel.on('broadcast', { event: 'action' }, ({ payload }) => {
+    if (!payload || payload.from === selfId) return;
+    onAction && onAction(payload.from, payload.msg);
+  });
   channel.subscribe(async (status) => {
     if (status === 'SUBSCRIBED') {
       try {
@@ -205,6 +212,17 @@ function leaveRoom() {
     if (client) client.removeChannel(room.channel);
   } catch {}
   room = null;
+}
+
+// Fan a lightweight event (a shout or a frog "bounce" beat) out to everyone in
+// the current room over its Supabase channel. Frog state normally stays P2P,
+// but roommates have no P2P link, so these opt-in events ride the room channel.
+// No-ops when we're not in a room.
+function broadcastRoom(msg) {
+  if (!room || !msg) return;
+  try {
+    room.channel.send({ type: 'broadcast', event: 'action', payload: { from: selfId, msg } });
+  } catch {}
 }
 
 // Re-announce the local profile (name/color change) to the current room.
@@ -276,6 +294,7 @@ module.exports = {
   sendSignal,
   joinRoom,
   leaveRoom,
+  broadcastRoom,
   updateRoomProfile,
   publishProfile,
   fetchProfiles,

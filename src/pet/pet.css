@@ -143,9 +143,11 @@ body {
   left: 50%;
   top: 2px;
   transform: translateX(-50%) translateY(6px);
-  max-width: 148px;
+  width: fit-content;
+  max-width: 116px;
   padding: 6px 9px;
-  font: 500 11px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 500 11px -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.3;
   color: #1c2b24;
   background: #ffffff;
   border-radius: 10px;
@@ -215,6 +217,32 @@ body {
 }
 .arcbtn.visible {
   display: flex;
+}
+
+/* When the slots fade in on hover they pop in one after another, left to right
+   (slot 0 -> 1 -> 2). backwards fill keeps each hidden until its turn, and
+   dropping the animation afterwards leaves the hover transform free to work. */
+.slot.visible {
+  animation: slot-appear 0.24s ease backwards;
+}
+.slot[data-slot="0"].visible {
+  animation-delay: 0s;
+}
+.slot[data-slot="1"].visible {
+  animation-delay: 0.07s;
+}
+.slot[data-slot="2"].visible {
+  animation-delay: 0.14s;
+}
+@keyframes slot-appear {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Three arc positions: left, top-center, right. */
@@ -370,6 +398,14 @@ body {
   display: flex;
   animation: notif-flash 0.9s ease-in-out infinite;
 }
+/* While a notification is pending, its floating bubbles become tap targets:
+   clicking one answers the notification the same as tapping the frog. */
+.frog-notifying .notif,
+.frog-notifying #frogmsg.visible,
+.frog-notifying #timer.awaiting {
+  pointer-events: auto;
+  cursor: pointer;
+}
 @keyframes notif-flash {
   0%,
   100% {
@@ -390,8 +426,8 @@ body {
 .petbtn {
   position: absolute;
   bottom: 46px;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   display: none;
   align-items: center;
   justify-content: center;

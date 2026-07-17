@@ -23,8 +23,8 @@ window.api.on('anim:key', () => engine.onKey());
 window.api.on('anim:idle', () => engine.idle());
 window.api.on('anim:sleep', () => engine.sleep());
 window.api.on('anim:wake', () => engine.wake());
-window.api.on('anim:jump', () => engine.forceJump());
-window.api.on('anim:dance', () => engine.dance());
+window.api.on('anim:jump', (opts) => engine.forceJump(opts));
+window.api.on('anim:dance', (opts) => engine.dance(opts));
 window.api.on('attention:stop', () => {});
 window.api.on('entry:saved', () => engine.celebrate());
 window.api.on('config:updated', (cfg) => {
@@ -35,11 +35,15 @@ window.api.on('config:updated', (cfg) => {
   applyAnimPrefs(cfg);
 });
 
+// When on, clicking the frog makes it squish. Kept in sync with settings.
+let squishOnClick = false;
+
 // The "disable animations" / "disable typing squish" appearance toggles.
 function applyAnimPrefs(cfg) {
   if (!cfg) return;
   engine.setTypingSquish(cfg.typingSquish !== false);
   engine.setAnimationsEnabled(cfg.animations !== false);
+  squishOnClick = !!cfg.squishOnClick;
 }
 // While an app is notifying (or a friend invite / journal nag is waiting), hide
 // every app button (the arc slots + the frog's own slot badge) and flash the
@@ -54,7 +58,8 @@ let notifyDanceTimer = null;
 function startNotifyDance() {
   if (notifyDanceTimer) return; // already looping
   const burst = () => {
-    engine.dance();
+    // Only the squish is broadcast to friends; the hop is local eye-candy.
+    engine.dance({ syncSquish: true });
     notifyDanceTimer = setTimeout(burst, NOTIFY_DANCE_SPAN + NOTIFY_DANCE_GAP);
   };
   burst();
@@ -63,6 +68,9 @@ function stopNotifyDance() {
   if (notifyDanceTimer) {
     clearTimeout(notifyDanceTimer);
     notifyDanceTimer = null;
+    // The squish beats leave friends' frogs held in a crouch, so send an idle
+    // beat to release them back to their resting pose once the nag clears.
+    engine.idle();
   }
 }
 
@@ -207,7 +215,7 @@ document.documentElement.style.setProperty('--press-ms', LONG_PRESS_MS + 'ms');
 // When the frog button is disabled (settings toggle), the frog stops acting as
 // the 4th slot: no badge, no picker gesture, and a tap opens the journal (main
 // handles that fallback). Kept in sync via config:updated.
-let frogButtonEnabled = true;
+let frogButtonEnabled = false;
 function applyFrogButton(enabled) {
   frogButtonEnabled = enabled !== false;
   if (petSlotEl) petSlotEl.classList.toggle('off', !frogButtonEnabled);
@@ -306,6 +314,38 @@ function overButtons(x, y) {
   });
 }
 
+// While a notification is pending, its floating bubble — the flashing beacon,
+// a finished Pomodoro's tap prompt, or a reminder pill — is a tap target too, so
+// clicking the bubble answers the notification just like tapping the frog. These
+// float above the frog's head, out of reach of the sprite's own hit test, so we
+// hover-test them here to keep the window interactive over the bubble.
+function overNotifBubble(x, y) {
+  if (!document.body.classList.contains('frog-notifying')) return false;
+  const pad = 6;
+  const hit = (el) => {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+  };
+  return (
+    hit(notifEl) ||
+    (frogMsgEl && frogMsgEl.classList.contains('visible') && hit(frogMsgEl)) ||
+    (timerEl && timerEl.classList.contains('awaiting') && hit(timerEl))
+  );
+}
+
+// A tap on any of those bubbles is handed straight to main as a frog tap, which
+// delivers it to whoever raised the notification (same path as tapping the frog).
+[notifEl, frogMsgEl, timerEl].forEach((el) => {
+  if (!el) return;
+  el.addEventListener('click', () => {
+    if (!document.body.classList.contains('frog-notifying')) return;
+    if (squishOnClick) engine.squish();
+    window.api.send('pet:click');
+  });
+});
+
 // --- Drag vs click ---------------------------------------------------------
 let down = null;
 let hideTimer = null;
@@ -314,6 +354,16 @@ let hideTimer = null;
 // own slot badge (only shown while the frog is hovered, like the arc slots).
 const hoverEls = petSlotEl ? [...buttons, petSlotEl] : buttons;
 
+// While the frog is hovered we drop the user's transparency setting and show it
+// fully opaque (main eases the window opacity for a small fade). Guarded so we
+// only fire on state changes, not on every mousemove.
+let frogFocused = false;
+function setFrogFocused(on) {
+  if (on === frogFocused) return;
+  frogFocused = on;
+  window.api.send('pet:hover', on);
+}
+
 function keepGear() {
   if (hideTimer) {
     clearTimeout(hideTimer);
@@ -321,6 +371,7 @@ function keepGear() {
   }
   hoverEls.forEach((b) => b.classList.add('visible'));
   setInteractive(true);
+  setFrogFocused(true);
 }
 
 function releaseGear() {
@@ -329,6 +380,7 @@ function releaseGear() {
     hideTimer = null;
     hoverEls.forEach((b) => b.classList.remove('visible'));
     setInteractive(false);
+    setFrogFocused(false);
   }, 600);
 }
 
@@ -357,7 +409,10 @@ window.addEventListener('mousemove', (e) => {
     }
     return;
   }
-  const hot = engine.overFrog(e.clientX, e.clientY) || overButtons(e.clientX, e.clientY);
+  const hot =
+    engine.overFrog(e.clientX, e.clientY) ||
+    overButtons(e.clientX, e.clientY) ||
+    overNotifBubble(e.clientX, e.clientY);
   if (hot) {
     keepGear();
   } else if (gear.classList.contains('visible')) {
@@ -374,6 +429,7 @@ function hideButtons() {
   }
   hoverEls.forEach((b) => b.classList.remove('visible'));
   setInteractive(false);
+  setFrogFocused(false);
 }
 
 document.addEventListener('mouseleave', () => {
@@ -419,6 +475,7 @@ window.addEventListener('mouseup', () => {
   if (wasDrag) {
     window.api.send('pet:move-end');
   } else {
+    if (squishOnClick) engine.squish();
     window.api.send('pet:click');
   }
 });

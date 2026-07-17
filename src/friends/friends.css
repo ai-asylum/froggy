@@ -123,6 +123,46 @@ button {
 button:hover {
   background: #43a047;
 }
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Primary invite/accept actions grow on hover and press in on click. */
+#addfriend,
+.accept {
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+#addfriend:hover,
+.accept:hover {
+  transform: scale(1.08);
+}
+#addfriend:active,
+.accept:active {
+  transform: scale(0.94);
+}
+#addfriend:disabled:hover,
+.accept:disabled:hover {
+  transform: none;
+  background: #4caf50;
+}
+
+/* Post-click confirmation on the Send button ("Sent ✓"). */
+@keyframes sentpop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+#addfriend.sent {
+  background: #2e9e55;
+  animation: sentpop 0.3s ease;
+}
 
 .netstatus {
   font-size: 11px;

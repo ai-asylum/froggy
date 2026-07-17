@@ -207,18 +207,34 @@ function createEngine(canvas, opts = {}) {
     onEvent({ type: 'key' });
   }
 
+  // A deliberate squish (e.g. tapping the frog): the same charge/release beat as
+  // a keystroke, but independent of the typing-squish gate so it fires on any
+  // click. Still frozen when animations are off. Broadcasts the beat so friends'
+  // copies squish along too.
+  function squish() {
+    if (!animationsOn) return;
+    mode = 'charge';
+    charge = Math.min(charge + 1, MAX_CHARGE);
+    const now = performance.now();
+    lastKeyAt = now;
+    pulseAt = now;
+    onEvent({ type: 'key' });
+  }
+
   // Release the spring into a jump/hop scaled to the charge (or a forced apex).
-  function launchJump(forcedHeight) {
+  // A `silent` launch animates locally but reports no beat, so personal nags
+  // (reminders) don't get mirrored onto friends' frogs.
+  function launchJump(forcedHeight, silent) {
     const height =
       forcedHeight != null ? forcedHeight : MIN_JUMP + (MAX_JUMP - MIN_JUMP) * chargeRatio();
     const name = height >= 28 ? 'jump' : 'hop';
     playClip(name, height / ANIMATIONS[name].arcHeight);
     charge = 0;
-    onEvent({ type: name, height });
+    if (!silent) onEvent({ type: name, height });
   }
 
-  function forceJump() {
-    launchJump(MAX_JUMP);
+  function forceJump(opts) {
+    launchJump(MAX_JUMP, opts && opts.silent);
   }
   function celebrate() {
     launchJump(20);
@@ -226,7 +242,12 @@ function createEngine(canvas, opts = {}) {
   // A playful little dance: four quick hops in a row. Any in-progress dance is
   // cancelled first so overlapping calls don't stack into double-speed hopping.
   let danceTimer = null;
-  function dance() {
+  function dance(opts) {
+    const silent = !!(opts && opts.silent);
+    // Notification dances broadcast only the squish (anticipation) beat; the
+    // hop itself stays local eye-candy, so friends' frogs squish in sympathy
+    // instead of bouncing around their screen.
+    const syncSquish = !!(opts && opts.syncSquish);
     if (danceTimer) {
       clearTimeout(danceTimer);
       danceTimer = null;
@@ -237,7 +258,8 @@ function createEngine(canvas, opts = {}) {
         danceTimer = null;
         return;
       }
-      launchJump(16);
+      if (syncSquish) onEvent({ type: 'squish' });
+      launchJump(16, silent || syncSquish);
       danceTimer = setTimeout(hop, 240);
     };
     hop();
@@ -284,6 +306,7 @@ function createEngine(canvas, opts = {}) {
     if (!msg || !msg.type) return;
     switch (msg.type) {
       case 'key':
+      case 'squish':
         remoteKeyPulse();
         break;
       case 'hop':
@@ -438,6 +461,7 @@ function createEngine(canvas, opts = {}) {
 
   return {
     onKey,
+    squish,
     forceJump,
     celebrate,
     dance,

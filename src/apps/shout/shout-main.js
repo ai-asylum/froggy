@@ -69,7 +69,7 @@ function createShout({ getPetBounds, broadcast, preloadPath, margin = 24, bottom
       }
     });
     win.setAlwaysOnTop(true, 'screen-saver');
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreenScreen: true });
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.loadFile(path.join(__dirname, 'index.html'));
     win.on('closed', () => {
       win = null;

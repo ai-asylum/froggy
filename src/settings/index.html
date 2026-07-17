@@ -16,6 +16,30 @@
       <div id="scroll">
         <!-- ============================ MAIN ============================ -->
         <section class="view" id="view-main">
+          <button class="nav accent" data-goto="apps" hidden>
+            <span>Applications</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="settings">
+            <span>Settings</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="appearance">
+            <span>Appearance</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="friends">
+            <span>Manage friends</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="rooms">
+            <span>Rooms</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+        </section>
+
+        <!-- =========================== SETTINGS ========================= -->
+        <section class="view" id="view-settings" hidden>
           <label class="field row">
             <span class="lbl">Launch at login</span>
             <input id="autolaunch" type="checkbox" />
@@ -36,24 +60,15 @@
             <input id="animations" type="checkbox" />
           </label>
 
-          <hr class="sep" />
+          <label class="field row">
+            <span class="lbl">Squish on click</span>
+            <input id="squishonclick" type="checkbox" />
+          </label>
 
-          <button class="nav accent" data-goto="apps" hidden>
-            <span>Applications</span>
-            <span class="chev">&rsaquo;</span>
-          </button>
-          <button class="nav" data-goto="appearance">
-            <span>Appearance</span>
-            <span class="chev">&rsaquo;</span>
-          </button>
-          <button class="nav" data-goto="friends">
-            <span>Manage friends</span>
-            <span class="chev">&rsaquo;</span>
-          </button>
-          <button class="nav" data-goto="rooms">
-            <span>Rooms</span>
-            <span class="chev">&rsaquo;</span>
-          </button>
+          <label class="field row" id="alldesktops-field" hidden>
+            <span class="lbl">Show on all desktops</span>
+            <input id="alldesktops" type="checkbox" />
+          </label>
         </section>
 
         <!-- ======================== APPLICATIONS ======================== -->

@@ -21,7 +21,13 @@ const autoPushHintEl = document.getElementById('autopush-hint');
 const frogButtonEl = document.getElementById('frogbutton');
 const typingSquishEl = document.getElementById('typingsquish');
 const animationsEl = document.getElementById('animations');
+const squishOnClickEl = document.getElementById('squishonclick');
+const allDesktopsEl = document.getElementById('alldesktops');
+const allDesktopsFieldEl = document.getElementById('alldesktops-field');
 const statusEl = document.getElementById('status');
+
+// "Show on all desktops" is a macOS Spaces feature; only surface it there.
+if (window.api.platform === 'darwin') allDesktopsFieldEl.hidden = false;
 
 let state = {};
 
@@ -35,6 +41,7 @@ function flash(msg) {
 const TITLES = {
   main: 'Froggy settings',
   apps: 'Applications',
+  settings: 'Settings',
   appearance: 'Appearance',
   friends: 'Manage friends',
   rooms: 'Rooms',
@@ -168,6 +175,9 @@ async function load() {
   typingSquishEl.checked = state.typingSquish !== false;
   animationsEl.checked = state.animations !== false;
   typingSquishEl.disabled = state.animations === false;
+  squishOnClickEl.checked = !!state.squishOnClick;
+  squishOnClickEl.disabled = state.animations === false;
+  allDesktopsEl.checked = state.allDesktops !== false;
   renderColors();
   refreshAutoPush();
 }
@@ -230,8 +240,20 @@ typingSquishEl.addEventListener('change', async () => {
 
 animationsEl.addEventListener('change', async () => {
   state = await window.api.invoke('settings:set', { animations: animationsEl.checked });
-  // Typing-squish is a no-op while all animations are off; reflect that.
+  // Typing-squish and squish-on-click are no-ops while all animations are off;
+  // reflect that.
   typingSquishEl.disabled = !animationsEl.checked;
+  squishOnClickEl.disabled = !animationsEl.checked;
+  flash('Saved');
+});
+
+squishOnClickEl.addEventListener('change', async () => {
+  state = await window.api.invoke('settings:set', { squishOnClick: squishOnClickEl.checked });
+  flash('Saved');
+});
+
+allDesktopsEl.addEventListener('change', async () => {
+  state = await window.api.invoke('settings:set', { allDesktops: allDesktopsEl.checked });
   flash('Saved');
 });
 
@@ -325,7 +347,14 @@ function renderRoom() {
       add.className = 'accept';
       add.textContent = 'Add friend';
       add.addEventListener('click', async () => {
+        add.disabled = true;
+        add.textContent = 'Sending…';
         const res = await window.api.invoke('friends:add', { code: m.id, label: m.name });
+        // On success the friends:changed push re-renders this row as "pending".
+        if (!(res && res.ok)) {
+          add.disabled = false;
+          add.textContent = 'Add friend';
+        }
         flash(res && res.ok ? 'Invite sent' : (res && res.error) || 'Could not send');
       });
       row.append(add);
@@ -422,7 +451,9 @@ document.getElementById('copycode').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('addfriend').addEventListener('click', async () => {
+const addFriendBtn = document.getElementById('addfriend');
+addFriendBtn.addEventListener('click', async () => {
+  if (addFriendBtn.classList.contains('sent')) return; // confirmation still showing
   const code = friendCodeEl.value.trim();
   if (!code) {
     friendCodeEl.focus();
@@ -431,6 +462,12 @@ document.getElementById('addfriend').addEventListener('click', async () => {
   const res = await window.api.invoke('friends:add', { code });
   if (res && res.ok) {
     friendCodeEl.value = '';
+    addFriendBtn.classList.add('sent');
+    addFriendBtn.textContent = 'Sent ✓';
+    setTimeout(() => {
+      addFriendBtn.classList.remove('sent');
+      addFriendBtn.textContent = 'Send';
+    }, 1400);
     flash('Invite sent');
   } else {
     flash((res && res.error) || 'Could not send');
