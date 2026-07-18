@@ -153,7 +153,7 @@ body.hovered #buttons {
    flanking ones dip down (via margin-top, so it doesn't fight the pop/float
    transforms), curving the trio over the top of the pond. */
 #buttons {
-  top: -15px;
+  top: -60px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
