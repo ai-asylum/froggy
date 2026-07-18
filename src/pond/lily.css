@@ -1,0 +1,36 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Manual drag (see lily.js), so no app-region here — a drag region would
+   swallow the click that reopens the pond. */
+#pad {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+  transition: transform 0.12s ease;
+}
+
+body:hover #pad {
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+body:active #pad {
+  transform: translate(-50%, -50%) scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pad {
+    transition: none;
+  }
+}

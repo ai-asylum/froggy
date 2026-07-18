@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';" />
     <link rel="stylesheet" href="settings.css" />
   </head>
   <body>
@@ -26,6 +26,10 @@
           </button>
           <button class="nav" data-goto="appearance">
             <span>Appearance</span>
+            <span class="chev">&rsaquo;</span>
+          </button>
+          <button class="nav" data-goto="furniture">
+            <span>Pond</span>
             <span class="chev">&rsaquo;</span>
           </button>
           <button class="nav" data-goto="friends">
@@ -98,6 +102,26 @@
               <span id="scaleVal"></span>
             </div>
           </label>
+        </section>
+
+        <!-- =========================== POND ============================= -->
+        <section class="view" id="view-furniture" hidden>
+          <p class="hint">
+            Tap a piece to place it in the pond — one of each type at a time
+            (tapping a highlighted piece removes it). Mix different pieces
+            freely; drag them around the pond and scroll to resize. In a room,
+            the pond and everything in it is shared with everyone there.
+          </p>
+
+          <label class="field">
+            <span class="lbl">Size</span>
+            <div class="interval">
+              <input id="furnitureScale" type="range" min="1" max="12" step="1" />
+              <span id="furnitureScaleVal"></span>
+            </div>
+          </label>
+
+          <div id="furniture" class="furniture"></div>
         </section>
 
         <!-- ========================== FRIENDS =========================== -->

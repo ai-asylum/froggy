@@ -23,6 +23,7 @@ const { createPomodoro } = require('./apps/pomodoro/pomodoro');
 const { createCountdown } = require('./apps/countdown/countdown');
 const { createReminder } = require('./apps/water/water');
 const { createShout } = require('./apps/shout/shout-main');
+const furnitureCatalog = require('./pond/catalog');
 
 const COLORS = ['green', 'orange', 'pink', 'brown', 'rnbw', 'blue'];
 
@@ -31,6 +32,32 @@ function spriteDataUrl(color) {
   const file = path.join(__dirname, '..', 'assets', `froggy-${safe}.png`);
   const b64 = fs.readFileSync(file).toString('base64');
   return `data:image/png;base64,${b64}`;
+}
+
+// Furniture spritesheets, each inlined once as a data URL. The renderer's CSP
+// blocks direct file:// references (same reason the frog art is base64-inlined),
+// so both the settings preview and every spawned piece get their sheet this way.
+const furnitureSheetCache = new Map();
+function furnitureSheetDataUrl(sheetId) {
+  if (furnitureSheetCache.has(sheetId)) return furnitureSheetCache.get(sheetId);
+  const sheet = furnitureCatalog.SHEETS[sheetId];
+  if (!sheet) return null;
+  const b64 = fs.readFileSync(sheet.file).toString('base64');
+  const url = `data:image/png;base64,${b64}`;
+  furnitureSheetCache.set(sheetId, url);
+  return url;
+}
+
+// The pond's background art, inlined once for the same CSP reason.
+let pondArtCache = null;
+function pondArtDataUrl() {
+  if (!pondArtCache) {
+    const b64 = fs
+      .readFileSync(path.join(__dirname, '..', 'assets', 'pond.png'))
+      .toString('base64');
+    pondArtCache = `data:image/png;base64,${b64}`;
+  }
+  return pondArtCache;
 }
 
 // Commit + push new notes in the background when auto-push is enabled.
@@ -96,6 +123,9 @@ function applyPetScale(scale) {
     const cfg = config.load();
     config.save({ remotePositions: { ...(cfg.remotePositions || {}), [id]: { x: cx, y: cy } } });
   }
+
+  // Frog windows changed size, so their pond anchors shifted: re-seat everyone.
+  if (pondVisible) layoutPondFrogs();
 }
 
 let petWin = null;
@@ -359,6 +389,677 @@ function openSettingsWindow(initialView) {
   settingsWin.on('closed', () => {
     settingsWin = null;
   });
+}
+
+// ---------------------------------------------------------------------------
+// The Pond
+// ---------------------------------------------------------------------------
+// The pond is the room made visible: one floating window (the pond art) that
+// furniture is placed *into* and that every roommate's frog gathers on. All of
+// its contents live in pond coordinates — px/py offsets from the pond's
+// top-left — which is what makes them shareable: the same offsets land on the
+// same lily-pad spot on everyone's screen, wherever their pond sits.
+//
+//   - Furniture: your pieces (persisted in config, pond-relative) plus
+//     roommates' pieces (mirrored, view-only), all drawn by the pond renderer.
+//     Adds, removes, moves, and resizes are synced over the room channel.
+//   - Frogs: separate OS windows glued on top of the pond. While the pond is
+//     visible your frog is clamped inside it and its spot is streamed to the
+//     room; roommates' frogs are pinned to their synced spots.
+//   - Hidden pond: collapses to a draggable lily pad, the furniture disappears
+//     with it, and every frog roams the desktop freely again.
+const POND_W = 560;
+const POND_H = 305;
+// Transparent breathing room around the pond art, on every side. The window is
+// this much bigger than the water so the pond floats with a margin (and its
+// pop-in bounce isn't clipped). The pond *coordinate* space stays POND_W x
+// POND_H (the art), so furniture and frogs sit on the water exactly as before —
+// only the window grew and pondOrigin() points at the art, not the window.
+const POND_MARGIN = 40;
+// Extra transparent space above the water (on top of the uniform margin), so the
+// pond's arc buttons can lift above the water's top edge without being clipped.
+const POND_HEADROOM = 48;
+const POND_WIN_W = POND_W + POND_MARGIN * 2;
+const POND_WIN_H = POND_H + POND_MARGIN * 2 + POND_HEADROOM;
+// How far the frog's feet (its anchor) can roam inside the pond. 0 on a side
+// lets the frog's anchor reach that very edge of the pond PNG.
+const POND_FROG_INSET = { left: 0, right: 0, top: 0, bottom: 10 };
+const LILY_SIZE = 64;
+
+let pondWin = null;
+let lilyWin = null;
+let pondVisible = false;
+let pondHoverTimer = null;
+let pondHovered = false;
+// Pieces placed by other people in my room, mirrored into my pond (view-only).
+// uid -> { owner, itemId, px, py, scale } where owner is the roommate's id.
+const roomFurniture = new Map();
+// Roommates' frog spots (pond coords, the frog's feet), fed by pond-pos
+// broadcasts. Kept fresh even while my pond is hidden so reopening it seats
+// everyone straight away.
+const pondRemotePos = new Map(); // memberId -> { x, y }
+let myPondPos = null; // my frog's feet in pond coords (while the pond is up)
+let pondPosBroadcastAt = 0;
+
+const DEFAULT_FURNITURE_SCALE = 3;
+const MIN_FURNITURE_SCALE = 1;
+const MAX_FURNITURE_SCALE = 12;
+
+function clampFurnitureScale(s) {
+  const n = Math.round(Number(s));
+  if (!Number.isFinite(n)) return DEFAULT_FURNITURE_SCALE;
+  return Math.min(MAX_FURNITURE_SCALE, Math.max(MIN_FURNITURE_SCALE, n));
+}
+
+function newFurnitureUid() {
+  return `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function saveFurniture(entries) {
+  config.save({ furniture: entries });
+}
+
+// Clamp a furniture entry so the whole piece sits inside the pond (scale capped
+// to whatever still fits). Used on everything: my placements, my drags, and
+// roommates' broadcasts (never trust remote coordinates).
+function clampFurnitureEntry(entry) {
+  const item = furnitureCatalog.get(entry.itemId);
+  if (!item) return entry;
+  const maxScale = Math.max(
+    MIN_FURNITURE_SCALE,
+    Math.min(MAX_FURNITURE_SCALE, Math.floor(POND_W / item.w), Math.floor(POND_H / item.h))
+  );
+  const s = Math.min(clampFurnitureScale(entry.scale), maxScale);
+  const px = Number.isFinite(entry.px) ? Math.round(entry.px) : 0;
+  const py = Number.isFinite(entry.py) ? Math.round(entry.py) : 0;
+  return {
+    ...entry,
+    scale: s,
+    px: Math.max(0, Math.min(px, POND_W - item.w * s)),
+    py: Math.max(0, Math.min(py, POND_H - item.h * s))
+  };
+}
+
+// Remember where a *type* of piece was last placed/sized, so re-placing it
+// (after toggling it off) brings it back to the same spot rather than the
+// default cascade. Keyed by itemId since only one of each type is ever out.
+function rememberFurniturePosition(itemId, patch) {
+  if (!itemId) return;
+  const positions = { ...(config.load().furniturePositions || {}) };
+  positions[itemId] = { ...(positions[itemId] || {}), ...patch };
+  config.save({ furniturePositions: positions });
+}
+
+// --- Pond window -------------------------------------------------------------
+// The pond coordinate origin: the top-left of the *water*, which sits one
+// margin in from the (larger) window's top-left. Every frog/furniture
+// translation goes through here, so the margin stays transparent padding.
+function pondOrigin() {
+  if (!pondWin || pondWin.isDestroyed()) return null;
+  const [x, y] = pondWin.getPosition();
+  return { x: x + POND_MARGIN, y: y + POND_MARGIN + POND_HEADROOM };
+}
+
+// Where a frog's feet sit relative to its window's top-left, so pond coords
+// (which track feet) translate to window positions.
+function myFrogAnchorOffset() {
+  return { x: Math.round(PET_W / 2), y: PET_H - Math.round(PET_BOTTOM_PAD * petScale) };
+}
+function remoteAnchorOffset() {
+  // The remote frog is bottom-aligned in its window (headroom is at the top).
+  return { x: Math.round(REMOTE_W / 2), y: REMOTE_H };
+}
+
+function clampPondAnchor(pos) {
+  return {
+    x: Math.max(
+      POND_FROG_INSET.left,
+      Math.min(Math.round(Number(pos.x) || 0), POND_W - POND_FROG_INSET.right)
+    ),
+    y: Math.max(
+      POND_FROG_INSET.top,
+      Math.min(Math.round(Number(pos.y) || 0), POND_H - POND_FROG_INSET.bottom)
+    )
+  };
+}
+
+// Everything the pond renderer needs to draw itself: my pieces plus roommates'.
+function pondFurnitureList() {
+  const mine = (config.load().furniture || []).map((e) => ({ ...e, owned: true }));
+  const theirs = [...roomFurniture.entries()].map(([uid, e]) => ({
+    uid,
+    itemId: e.itemId,
+    px: e.px,
+    py: e.py,
+    scale: e.scale,
+    owned: false
+  }));
+  return [...mine, ...theirs];
+}
+
+function pondInitPayload() {
+  const sheets = {};
+  for (const id of Object.keys(furnitureCatalog.SHEETS)) {
+    try {
+      const meta = furnitureCatalog.SHEETS[id];
+      sheets[id] = { dataUrl: furnitureSheetDataUrl(id), w: meta.w, h: meta.h };
+    } catch (err) {
+      console.error(`Failed to load furniture sheet ${id}:`, err.message);
+      sheets[id] = { dataUrl: null, w: 0, h: 0 };
+    }
+  }
+  return {
+    bg: pondArtDataUrl(),
+    margin: POND_MARGIN,
+    headroom: POND_HEADROOM,
+    sheets,
+    items: furnitureCatalog.ITEMS,
+    furniture: pondFurnitureList(),
+    room: currentRoom,
+    members: roomMembers.size
+  };
+}
+
+function pushPondFurniture() {
+  if (!pondWin || pondWin.isDestroyed() || pondWin.webContents.isLoading()) return;
+  pondWin.webContents.send('pond:furniture', { furniture: pondFurnitureList() });
+}
+
+function pushPondRoom() {
+  if (!pondWin || pondWin.isDestroyed() || pondWin.webContents.isLoading()) return;
+  pondWin.webContents.send('pond:room', { room: currentRoom, members: roomMembers.size });
+}
+
+function createPondWindow() {
+  if (pondWin) return pondWin;
+  const cfg = config.load();
+
+  let x;
+  let y;
+  const saved = cfg.pondPosition;
+  if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+    ({ x, y } = clampToWorkArea(saved.x, saved.y, POND_WIN_W, POND_WIN_H));
+  } else {
+    // First open: centre the pond on whichever display the frog lives on.
+    const b = petUrl();
+    const area = b
+      ? screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y + b.height / 2 }).workArea
+      : screen.getPrimaryDisplay().workArea;
+    ({ x, y } = clampToWorkArea(
+      Math.round(area.x + (area.width - POND_WIN_W) / 2),
+      Math.round(area.y + (area.height - POND_WIN_H) / 2),
+      POND_WIN_W,
+      POND_WIN_H
+    ));
+  }
+
+  pondWin = new BrowserWindow({
+    width: POND_WIN_W,
+    height: POND_WIN_H,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    fullscreenable: false,
+    // Created hidden and shown (without stealing focus) once ready — a
+    // transparent window can flash opaque-white on macOS before its first paint.
+    show: false,
+    // Float above normal apps but below every frog (pet is 'screen-saver',
+    // remotes 'pop-up-menu'), so frogs always render on top of the water.
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  pondWin.setAlwaysOnTop(true, 'floating');
+  pondWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  pondWin.loadFile(path.join(__dirname, 'pond', 'index.html'));
+  pondWin.webContents.on('did-finish-load', () => {
+    if (pondWin && !pondWin.isDestroyed()) pondWin.webContents.send('pond:init', pondInitPayload());
+  });
+  // The pond is the raft everything sits on: while it's dragged (OS-level drag
+  // on the art), keep every in-pond frog glued to its pond-relative spot. The
+  // relative coords don't change, so nothing is re-broadcast.
+  pondWin.on('move', () => {
+    if (pondVisible) layoutPondFrogs();
+  });
+  pondWin.on('moved', () => {
+    if (!pondWin || pondWin.isDestroyed()) return;
+    const [px, py] = pondWin.getPosition();
+    config.save({ pondPosition: { x: px, y: py } });
+  });
+  pondWin.on('closed', () => {
+    pondWin = null;
+    stopPondHoverWatch();
+  });
+  return pondWin;
+}
+
+// The pond art is an OS drag region, which swallows the renderer's own mouse
+// events — CSS :hover can never fire over the water. So while the pond is up,
+// main watches the global cursor and tells the renderer when it's over the
+// pond; that class reveals the chip + buttons.
+function setPondHovered(on) {
+  if (on === pondHovered) return;
+  pondHovered = on;
+  if (pondWin && !pondWin.isDestroyed() && !pondWin.webContents.isLoading()) {
+    pondWin.webContents.send('pond:hover', { on });
+  }
+}
+
+function startPondHoverWatch() {
+  if (pondHoverTimer) return;
+  pondHoverTimer = setInterval(() => {
+    if (!pondVisible || !pondWin || pondWin.isDestroyed()) return;
+    let p;
+    try {
+      p = screen.getCursorScreenPoint();
+    } catch {
+      return;
+    }
+    const b = pondWin.getBounds();
+    setPondHovered(p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height);
+  }, 130);
+}
+
+function stopPondHoverWatch() {
+  if (pondHoverTimer) {
+    clearInterval(pondHoverTimer);
+    pondHoverTimer = null;
+  }
+  setPondHovered(false);
+}
+
+// A default perch for a roommate who hasn't broadcast a spot yet: fan them out
+// across the water so fresh arrivals don't stack on one lily pad.
+function defaultPondPerch(i) {
+  return clampPondAnchor({
+    x: POND_W / 2 + ((i % 4) - 1.5) * 110,
+    y: 170 + (Math.floor(i / 4) % 2) * 70
+  });
+}
+
+// Seat every frog at its pond spot: mine at myPondPos (restored / defaulted on
+// first open), each roommate at their last synced position. Runs on open, when
+// the pond is dragged, when someone joins, and when the frog scale changes.
+function layoutPondFrogs() {
+  if (!pondVisible) return;
+  const o = pondOrigin();
+  if (!o) return;
+
+  if (petWin) {
+    if (!myPondPos) {
+      const saved = config.load().pondFrogPos;
+      myPondPos =
+        saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
+          ? { x: saved.x, y: saved.y }
+          : { x: Math.round(POND_W / 2), y: POND_H - 40 };
+    }
+    myPondPos = clampPondAnchor(myPondPos);
+    const off = myFrogAnchorOffset();
+    petWin.setPosition(Math.round(o.x + myPondPos.x - off.x), Math.round(o.y + myPondPos.y - off.y));
+  }
+
+  let i = 0;
+  for (const id of roomMembers.keys()) {
+    const w = remoteWins.get(id);
+    if (w && !w.isDestroyed()) {
+      let rel = pondRemotePos.get(id);
+      if (!rel) {
+        rel = defaultPondPerch(i);
+        pondRemotePos.set(id, rel);
+      }
+      rel = clampPondAnchor(rel);
+      const off = remoteAnchorOffset();
+      w.setPosition(Math.round(o.x + rel.x - off.x), Math.round(o.y + rel.y - off.y));
+    }
+    i += 1;
+  }
+}
+
+// Stream my frog's pond spot to the room (throttled while dragging; `force`
+// for the must-arrive sends: drag end, pond open, re-announces).
+const POND_POS_THROTTLE_MS = 90;
+function announceMyPondPos(opts = {}) {
+  if (!currentRoom || !myPondPos) return;
+  const now = Date.now();
+  if (!opts.force && now - pondPosBroadcastAt < POND_POS_THROTTLE_MS) return;
+  pondPosBroadcastAt = now;
+  signaling.broadcastRoom({ t: 'pond-pos', x: myPondPos.x, y: myPondPos.y });
+}
+
+// Show the pond (creating it as needed): frogs hop in, the lily pad goes away.
+// On the hidden -> visible edge we ask the room for fresh frog spots and
+// announce our own.
+function openPond() {
+  const wasVisible = pondVisible && pondWin && pondWin.isVisible();
+  createPondWindow();
+  pondVisible = true;
+  if (config.load().pondVisible !== true) config.save({ pondVisible: true });
+  hideLily();
+  if (!pondWin.isVisible()) {
+    // A transparent window can flash opaque-white on macOS if shown before its
+    // first paint — wait for ready-to-show on the freshly created pond.
+    if (pondWin.webContents.isLoading()) {
+      pondWin.once('ready-to-show', () => {
+        if (pondVisible && pondWin && !pondWin.isDestroyed() && !pondWin.isVisible()) {
+          pondWin.showInactive();
+          // (The renderer plays its bounce-in when pond:init lands.)
+        }
+      });
+    } else {
+      pondWin.showInactive();
+      if (!wasVisible) pondWin.webContents.send('pond:appear'); // bounce back in
+    }
+  }
+  startPondHoverWatch();
+  layoutPondFrogs();
+  if (!wasVisible && currentRoom) {
+    signaling.broadcastRoom({ t: 'pond-req' });
+    announceMyPondPos({ force: true });
+  }
+}
+
+// Hide the pond: furniture disappears with it, frogs roam free, and a small
+// draggable lily pad is left behind to bring it back.
+function hidePond() {
+  if (!pondVisible && !(pondWin && pondWin.isVisible())) return;
+  pondVisible = false;
+  config.save({ pondVisible: false });
+  stopPondHoverWatch();
+  if (pondWin && !pondWin.isDestroyed()) pondWin.hide();
+  showLily();
+}
+
+// --- Lily pad ----------------------------------------------------------------
+function showLily() {
+  if (lilyWin && !lilyWin.isDestroyed()) {
+    lilyWin.showInactive();
+    return;
+  }
+  const cfg = config.load();
+  let x;
+  let y;
+  const saved = cfg.lilyPosition;
+  if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+    ({ x, y } = clampToWorkArea(saved.x, saved.y, LILY_SIZE, LILY_SIZE));
+  } else if (pondWin && !pondWin.isDestroyed()) {
+    // Land the pad where the pond just was (bottom-left corner of the water,
+    // one margin in from the window edge).
+    const [px, py] = pondWin.getPosition();
+    ({ x, y } = clampToWorkArea(
+      px + POND_MARGIN + 24,
+      py + POND_MARGIN + POND_HEADROOM + POND_H - LILY_SIZE - 24,
+      LILY_SIZE,
+      LILY_SIZE
+    ));
+  } else {
+    const area = screen.getPrimaryDisplay().workArea;
+    x = area.x + area.width - LILY_SIZE - MARGIN;
+    y = area.y + MARGIN + PET_H + 12;
+  }
+  lilyWin = new BrowserWindow({
+    width: LILY_SIZE,
+    height: LILY_SIZE,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    movable: false, // dragged manually so a click can reopen the pond
+    hasShadow: false,
+    skipTaskbar: true,
+    fullscreenable: false,
+    show: false,
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  lilyWin.setAlwaysOnTop(true, 'floating');
+  lilyWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  lilyWin.once('ready-to-show', () => {
+    if (lilyWin && !lilyWin.isDestroyed()) lilyWin.showInactive();
+  });
+  lilyWin.loadFile(path.join(__dirname, 'pond', 'lily.html'));
+  lilyWin.on('closed', () => {
+    lilyWin = null;
+  });
+}
+
+function hideLily() {
+  if (lilyWin && !lilyWin.isDestroyed()) lilyWin.hide();
+}
+
+// Bring the pond back after a restart (or seed the lily pad if it was hidden).
+// Only surfaces once there's something to show: placed furniture or a room.
+function initPond() {
+  const cfg = config.load();
+  const list = cfg.furniture || [];
+  // One-time tidy for pieces saved by the pre-pond furniture builds (absolute
+  // desktop x/y): re-seat them across the pond.
+  if (list.some((e) => !Number.isFinite(e.px) || !Number.isFinite(e.py))) {
+    saveFurniture(
+      list.map((e, i) =>
+        clampFurnitureEntry({
+          uid: e.uid,
+          itemId: e.itemId,
+          scale: e.scale,
+          px: Number.isFinite(e.px) ? e.px : 48 + (i % 4) * 120,
+          py: Number.isFinite(e.py) ? e.py : 120 + Math.floor(i / 4) * 64
+        })
+      )
+    );
+  }
+  if (!list.length && !cfg.room) return;
+  if (cfg.pondVisible !== false) openPond();
+  else showLily();
+}
+
+// Place a brand-new piece of the given catalog item into the pond and persist
+// it. Only one piece of each type at a time, so a duplicate is a no-op. Placing
+// decor surfaces the pond so you see it land.
+function spawnFurniture(itemId, scale) {
+  const item = furnitureCatalog.get(itemId);
+  if (!item) return null;
+  const list = config.load().furniture || [];
+  if (list.some((e) => e.itemId === itemId)) return null; // never two of the same type
+  // Size precedence: an explicit request, then this type's remembered size,
+  // then the panel slider's default, then the built-in default.
+  const mem = (config.load().furniturePositions || {})[itemId] || {};
+  const cfgScale = config.load().furnitureScale;
+  const s = clampFurnitureScale(
+    Number.isFinite(scale)
+      ? scale
+      : Number.isFinite(mem.scale)
+        ? mem.scale
+        : Number.isFinite(cfgScale)
+          ? cfgScale
+          : DEFAULT_FURNITURE_SCALE
+  );
+  // Return to the type's remembered spot, or cascade fresh pieces around the
+  // lower middle of the pond.
+  const i = list.length;
+  const entry = clampFurnitureEntry({
+    uid: newFurnitureUid(),
+    itemId,
+    px: Number.isFinite(mem.px)
+      ? mem.px
+      : Math.round(POND_W / 2 - (item.w * s) / 2 + ((i % 3) - 1) * 96),
+    py: Number.isFinite(mem.py)
+      ? mem.py
+      : Math.round(POND_H / 2 - (item.h * s) / 2 + 36 + (i % 2) * 34),
+    scale: s
+  });
+  saveFurniture([...list, entry]);
+  broadcastFurnitureAdd(entry);
+  notifySettingsFurniture();
+  pushPondFurniture();
+  openPond();
+  return entry;
+}
+
+function removeFurniture(uid) {
+  saveFurniture((config.load().furniture || []).filter((e) => e.uid !== uid));
+  broadcastFurnitureRemove(uid);
+  notifySettingsFurniture();
+  pushPondFurniture();
+}
+
+// Move/resize one of my pieces (from a drag or scroll in the pond renderer):
+// clamp, persist, remember the spot for its type, and sync it to the room. The
+// pond renderer already shows the change, so nothing is echoed back to it
+// (an echo would fight an in-progress drag).
+function moveFurniture(uid, patch) {
+  const list = config.load().furniture || [];
+  const existing = list.find((e) => e.uid === uid);
+  if (!existing) return;
+  const entry = clampFurnitureEntry({ ...existing, ...patch });
+  saveFurniture(list.map((e) => (e.uid === uid ? entry : e)));
+  rememberFurniturePosition(entry.itemId, { px: entry.px, py: entry.py, scale: entry.scale });
+  broadcastFurnitureMove(entry);
+}
+
+// The catalog item ids I currently have placed (one per type). Drives the
+// picker's on/off highlight so you can see which types are already out.
+function shownFurnitureItemIds() {
+  return (config.load().furniture || []).map((e) => e.itemId);
+}
+
+// Keep the Furniture panel's highlight in step with what's actually on screen —
+// whether a piece changed from the picker or was removed via its × / right-click.
+function notifySettingsFurniture() {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.webContents.send('furniture:changed', { shown: shownFurnitureItemIds() });
+  }
+}
+
+// Picker click toggles a *type*: place one if none is out, or remove the
+// existing one. Different types coexist; the same type never stacks.
+function toggleFurniture(itemId, scale) {
+  const existing = (config.load().furniture || []).filter((e) => e.itemId === itemId);
+  if (existing.length) {
+    for (const e of existing) removeFurniture(e.uid);
+    return { shown: shownFurnitureItemIds(), added: false };
+  }
+  spawnFurniture(itemId, scale);
+  return { shown: shownFurnitureItemIds(), added: true };
+}
+
+// --- Room pond sync ----------------------------------------------------------
+// Everything in the pond is shared with the room over its broadcast channel:
+// furniture adds/moves/resizes/removes, plus each frog's pond spot. Roommates'
+// pieces land in `roomFurniture` (view-only). Broadcasts are ephemeral, so the
+// whole set is re-announced whenever a new member joins (see onRoomSync) or
+// someone reopens their pond (pond-req).
+function broadcastFurnitureAdd(entry) {
+  if (!currentRoom || !entry) return;
+  signaling.broadcastRoom({
+    t: 'furn-add',
+    uid: entry.uid,
+    itemId: entry.itemId,
+    px: entry.px,
+    py: entry.py,
+    scale: entry.scale
+  });
+}
+
+function broadcastFurnitureMove(entry) {
+  if (!currentRoom || !entry) return;
+  signaling.broadcastRoom({
+    t: 'furn-move',
+    uid: entry.uid,
+    px: entry.px,
+    py: entry.py,
+    scale: entry.scale
+  });
+}
+
+function broadcastFurnitureRemove(uid) {
+  if (!currentRoom || !uid) return;
+  signaling.broadcastRoom({ t: 'furn-remove', uid });
+}
+
+// (Re-)announce my whole pond — furniture + my frog's spot.
+function announceMyPond() {
+  if (!currentRoom) return;
+  for (const entry of config.load().furniture || []) broadcastFurnitureAdd(entry);
+  announceMyPondPos({ force: true });
+}
+
+// A roommate placed (or re-announced) a piece: mirror it into my pond. A
+// re-announce of a known piece just refreshes its position.
+function addRoomFurniture(owner, msg) {
+  if (!owner || !msg || !msg.uid) return;
+  if (!furnitureCatalog.get(msg.itemId)) return;
+  if ((config.load().furniture || []).some((e) => e.uid === msg.uid)) return; // that's mine
+  const known = roomFurniture.get(msg.uid);
+  if (known && known.owner !== owner) return; // a piece belongs to one owner
+  const entry = clampFurnitureEntry({ itemId: msg.itemId, px: msg.px, py: msg.py, scale: msg.scale });
+  roomFurniture.set(msg.uid, {
+    owner,
+    itemId: msg.itemId,
+    px: entry.px,
+    py: entry.py,
+    scale: entry.scale
+  });
+  pushPondFurniture();
+}
+
+// A roommate dragged or resized one of their pieces.
+function moveRoomFurniture(owner, msg) {
+  const known = roomFurniture.get(msg && msg.uid);
+  if (!known || known.owner !== owner) return;
+  const entry = clampFurnitureEntry({ itemId: known.itemId, px: msg.px, py: msg.py, scale: msg.scale });
+  known.px = entry.px;
+  known.py = entry.py;
+  known.scale = entry.scale;
+  pushPondFurniture();
+}
+
+function removeRoomFurniture(uid) {
+  if (roomFurniture.delete(uid)) pushPondFurniture();
+}
+
+// Drop every mirrored piece belonging to one roommate (they left the room).
+function removeRoomFurnitureByOwner(owner) {
+  let changed = false;
+  for (const [uid, entry] of [...roomFurniture]) {
+    if (entry.owner !== owner) continue;
+    roomFurniture.delete(uid);
+    changed = true;
+  }
+  if (changed) pushPondFurniture();
+}
+
+// Drop all mirrored pieces (I left the room / networking restarted).
+function clearRoomFurniture() {
+  if (!roomFurniture.size) return;
+  roomFurniture.clear();
+  pushPondFurniture();
+}
+
+// A roommate's frog moved in the pond. Remember the spot always (so reopening
+// the pond seats everyone), but only steer their window while the pond is up —
+// hidden-pond frogs roam the desktop freely.
+function onRoomPondPos(fromId, msg) {
+  const rel = clampPondAnchor({ x: msg.x, y: msg.y });
+  pondRemotePos.set(fromId, rel);
+  if (!pondVisible) return;
+  const o = pondOrigin();
+  const w = remoteWins.get(fromId);
+  if (!o || !w || w.isDestroyed()) return;
+  const off = remoteAnchorOffset();
+  w.setPosition(Math.round(o.x + rel.x - off.x), Math.round(o.y + rel.y - off.y));
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +1509,7 @@ function pushRoom() {
   };
   if (friendsWin) friendsWin.webContents.send('room:changed', payload);
   if (settingsWin) settingsWin.webContents.send('room:changed', payload);
+  pushPondRoom(); // the pond's chip shows the room + member count
   // Keep each frog's hover overlay in step with the room it's linked to.
   for (const id of remoteWins.keys()) updateRemoteMeta(id);
 }
@@ -823,9 +1525,13 @@ function onRoomSync(members) {
     next.set(m.id, { name: m.name || 'Froggy', color: m.color || '' });
   }
 
+  let gainedMember = false;
+
   for (const id of [...roomMembers.keys()]) {
     if (next.has(id)) continue;
     roomMembers.delete(id);
+    removeRoomFurnitureByOwner(id); // a departed roommate takes their decor with them
+    pondRemotePos.delete(id); // and vacates their pond spot
     if (roomFrogIds.has(id)) {
       roomFrogIds.delete(id);
       if (!isAcceptedFriend(id)) despawnRemoteFrog(id);
@@ -840,6 +1546,7 @@ function onRoomSync(members) {
     const known = roomMembers.get(id);
     roomMembers.set(id, m);
     if (!known) {
+      gainedMember = true;
       // A friend already has a frog on screen; only spawn for strangers, but
       // still wake it — sharing a room means they're clearly here, even if the
       // direct P2P link to that friend hasn't come up.
@@ -855,6 +1562,15 @@ function onRoomSync(members) {
     }
   }
 
+  // Newcomers' frogs hop straight into the visible pond.
+  if (gainedMember && pondVisible) layoutPondFrogs();
+
+  // Broadcasts are ephemeral: whenever someone new turns up (including the
+  // members already present when *I* join), re-announce my pond — furniture
+  // and my frog's spot — so it appears on the newcomer's screen too. A short
+  // delay lets a fresh room subscription settle before the first send.
+  if (gainedMember) setTimeout(announceMyPond, 400);
+
   pushRoom();
 }
 
@@ -865,9 +1581,24 @@ function onRoomSync(members) {
 const ROOM_ACTION_TYPES = new Set(['color', 'hop', 'jump', 'sleep', 'wake', 'idle', 'shout']);
 function onRoomAction(fromId, msg) {
   if (!fromId || fromId === config.load().selfId) return;
+  if (!msg) return;
+
+  // Pond sync (furniture + frog spots) rides the room channel too. Unlike frog
+  // beats it's never duplicated over P2P, so it's handled up front (before the
+  // connected / ROOM_ACTION_TYPES guards that dedupe frog animations).
+  if (msg.t === 'furn-add') return void addRoomFurniture(fromId, msg);
+  if (msg.t === 'furn-move') return void moveRoomFurniture(fromId, msg);
+  if (msg.t === 'furn-remove') return void removeRoomFurniture(msg.uid);
+  if (msg.t === 'pond-pos') {
+    if (roomMembers.has(fromId)) onRoomPondPos(fromId, msg);
+    return;
+  }
+  // Someone (re)opened their pond and wants everyone's current state.
+  if (msg.t === 'pond-req') return void announceMyPond();
+
   if (!roomMembers.has(fromId)) return; // only people actually in our room
   if (connected.has(fromId)) return; // a live P2P link already delivered it
-  if (!msg || !ROOM_ACTION_TYPES.has(msg.type)) return;
+  if (!ROOM_ACTION_TYPES.has(msg.type)) return;
   handlePeerData(fromId, msg);
 }
 
@@ -884,6 +1615,7 @@ function joinRoomLocal(name) {
   config.save({ room });
   signaling.joinRoom(room, { name: selfName(), color: cfg.color }, onRoomSync, onRoomAction);
   pushRoom();
+  openPond(); // joining a room opens its pond, frogs inside
   return { ok: true, room };
 }
 
@@ -894,8 +1626,11 @@ function leaveRoomLocal(opts = {}) {
   }
   roomFrogIds.clear();
   roomMembers.clear();
+  clearRoomFurniture(); // roommates' decor is only relevant while I'm in the room
+  pondRemotePos.clear();
   currentRoom = '';
   config.save({ room: '' });
+  pushPondRoom(); // the pond stays (solo), but drops the room chip
   // Kept frogs (accepted friends) may have been present only via this room —
   // refresh their pose so they turn away unless still reachable another way.
   for (const id of remoteWins.keys()) refreshRemotePresence(id);
@@ -911,7 +1646,10 @@ function restartNetworking() {
   connected.clear();
   roomFrogIds.clear();
   roomMembers.clear();
+  clearRoomFurniture();
+  pondRemotePos.clear();
   currentRoom = '';
+  pushPondRoom();
   if (netWin) {
     netWin.close();
     netWin = null;
@@ -1802,8 +2540,18 @@ function registerIpc() {
   ipcMain.on('pet:move', (_e, pos) => {
     if (!petWin || !pos) return;
     markActivity();
-    const x = Math.round(pos.x);
-    const y = Math.round(pos.y);
+    let x = Math.round(pos.x);
+    let y = Math.round(pos.y);
+    // While the pond is up your frog lives inside it: clamp the drag to the
+    // pond and stream the pond-relative spot to roommates.
+    const o = pondVisible ? pondOrigin() : null;
+    if (o) {
+      const off = myFrogAnchorOffset();
+      myPondPos = clampPondAnchor({ x: x + off.x - o.x, y: y + off.y - o.y });
+      x = Math.round(o.x + myPondPos.x - off.x);
+      y = Math.round(o.y + myPondPos.y - off.y);
+      announceMyPondPos();
+    }
     petWin.setPosition(x, y);
     const id = screen.getDisplayNearestPoint({ x: x + PET_W / 2, y: y + PET_H / 2 }).id;
     if (currentDisplayId !== null && id !== currentDisplayId) refreshTransparency();
@@ -1814,6 +2562,11 @@ function registerIpc() {
     if (!petWin) return;
     const [x, y] = petWin.getPosition();
     config.save({ position: { x, y } });
+    // The throttled stream may have swallowed the last spot: send it for sure.
+    if (pondVisible && myPondPos) {
+      config.save({ pondFrogPos: { ...myPondPos } });
+      announceMyPondPos({ force: true });
+    }
   });
 
   ipcMain.on('pet:click', () => {
@@ -2075,6 +2828,49 @@ function registerIpc() {
     }
   });
 
+  // --- Pond IPC --------------------------------------------------------------
+  // The catalog + inlined spritesheets, so the settings panel can preview every
+  // piece (and know its box + which sheet it lives on) without touching the
+  // filesystem itself.
+  ipcMain.handle('furniture:catalog', () => {
+    const sheets = {};
+    for (const id of Object.keys(furnitureCatalog.SHEETS)) {
+      try {
+        const meta = furnitureCatalog.SHEETS[id];
+        sheets[id] = { dataUrl: furnitureSheetDataUrl(id), w: meta.w, h: meta.h };
+      } catch (err) {
+        console.error(`Failed to load furniture sheet ${id}:`, err.message);
+        sheets[id] = { dataUrl: null, w: 0, h: 0 };
+      }
+    }
+    return { sheets, items: furnitureCatalog.ITEMS, shown: shownFurnitureItemIds() };
+  });
+  ipcMain.handle('furniture:spawn', (_e, { itemId, scale } = {}) => spawnFurniture(itemId, scale));
+  ipcMain.handle('furniture:toggle', (_e, { itemId, scale } = {}) => toggleFurniture(itemId, scale));
+
+  // The pond's own buttons + furniture gestures inside it.
+  ipcMain.on('pond:hide', () => hidePond());
+  ipcMain.on('pond:open-furniture', () => openSettingsWindow('furniture'));
+  ipcMain.on('pond:open-room', () => openSettingsWindow('rooms'));
+  ipcMain.on('pond:furn-move', (_e, { uid, px, py } = {}) => moveFurniture(uid, { px, py }));
+  ipcMain.on('pond:furn-scale', (_e, { uid, scale, px, py } = {}) =>
+    moveFurniture(uid, { scale, px, py })
+  );
+  ipcMain.on('pond:furn-remove', (_e, { uid } = {}) => removeFurniture(uid));
+
+  // The lily pad a hidden pond leaves behind: drag it around, click to reopen.
+  ipcMain.on('lily:move', (_e, pos) => {
+    if (lilyWin && !lilyWin.isDestroyed() && pos) {
+      lilyWin.setPosition(Math.round(pos.x), Math.round(pos.y));
+    }
+  });
+  ipcMain.on('lily:move-end', () => {
+    if (!lilyWin || lilyWin.isDestroyed()) return;
+    const [x, y] = lilyWin.getPosition();
+    config.save({ lilyPosition: { x, y } });
+  });
+  ipcMain.on('lily:click', () => openPond());
+
   // --- Multiplayer IPC -----------------------------------------------------
   // A local animation beat -> broadcast to every connected friend.
   ipcMain.on('net:local-event', (_e, msg) => {
@@ -2112,11 +2908,17 @@ function registerIpc() {
     const w = remoteWins.get(id);
     if (w) w.setIgnoreMouseEvents(!!ignore, { forward: true });
   });
+  // While the pond is visible, roommates' frogs are pinned to their synced
+  // pond spots — only your own frog can be moved. They roam free (draggable
+  // like before) once the pond is hidden.
+  const pondPinned = (id) => pondVisible && roomMembers.has(id);
   ipcMain.on('remote:move', (_e, { id, x, y }) => {
+    if (pondPinned(id)) return;
     const w = remoteWins.get(id);
     if (w) w.setPosition(Math.round(x), Math.round(y));
   });
   ipcMain.on('remote:move-end', (_e, { id }) => {
+    if (pondPinned(id)) return;
     const w = remoteWins.get(id);
     if (!w) return;
     const [x, y] = w.getPosition();
@@ -2297,6 +3099,7 @@ app.whenReady().then(() => {
   registerIpc();
   createTray();
   createPetWindow();
+  initPond();
   applyAutoLaunch();
   startKeyboardHook();
   scheduleHourly();

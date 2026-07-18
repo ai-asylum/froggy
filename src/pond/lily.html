@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline';"
+    />
+    <link rel="stylesheet" href="lily.css" />
+  </head>
+  <body>
+    <!-- The lily pad the hidden pond leaves behind. Drag it anywhere (manual
+         drag, so we can tell clicks from drags); a click reopens the pond.
+         The pad is an ellipse with the classic notch cut toward the centre. -->
+    <svg id="pad" viewBox="0 0 64 64" width="56" height="56" aria-label="Open the pond">
+      <!-- drop shadow / underside -->
+      <path d="M32 35 L58.6 31.7 A27 19 0 1 0 56.5 43 Z" fill="#1d5c30" />
+      <!-- the pad -->
+      <path d="M32 32 L58.6 28.7 A27 19 0 1 0 56.5 40 Z" fill="#48a05e" stroke="#2e7d43" stroke-width="2" stroke-linejoin="round" />
+      <!-- veins -->
+      <g stroke="#2e7d43" stroke-width="1.6" stroke-linecap="round" opacity="0.7">
+        <path d="M32 32 L14 26" fill="none" />
+        <path d="M32 32 L20 42" fill="none" />
+        <path d="M32 32 L40 46" fill="none" />
+        <path d="M32 32 L12 34" fill="none" />
+      </g>
+    </svg>
+    <script src="lily.js"></script>
+  </body>
+</html>

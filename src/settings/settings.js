@@ -15,6 +15,8 @@ const opacityEl = document.getElementById('opacity');
 const opacityValEl = document.getElementById('opacityVal');
 const scaleEl = document.getElementById('scale');
 const scaleValEl = document.getElementById('scaleVal');
+const furnitureScaleEl = document.getElementById('furnitureScale');
+const furnitureScaleValEl = document.getElementById('furnitureScaleVal');
 const autoEl = document.getElementById('autolaunch');
 const autoPushEl = document.getElementById('autopush');
 const autoPushHintEl = document.getElementById('autopush-hint');
@@ -43,6 +45,7 @@ const TITLES = {
   apps: 'Applications',
   settings: 'Settings',
   appearance: 'Appearance',
+  furniture: 'Pond',
   friends: 'Manage friends',
   rooms: 'Rooms',
   'app-journal': 'Micro journal',
@@ -64,6 +67,7 @@ function showView(name, { push = true } = {}) {
   backEl.hidden = stack.length <= 1;
   document.getElementById('scroll').scrollTop = 0;
   if (name === 'apps') loadApps();
+  if (name === 'furniture') loadFurniture();
   if (name === 'friends') loadFriends();
   if (name === 'rooms') loadRoom();
   if (name === 'app-pomodoro') loadPomodoro();
@@ -127,6 +131,100 @@ async function loadApps() {
   }
 }
 
+// --- Pond furniture ----------------------------------------------------------
+// Preview every catalog piece as a slice of the shared spritesheet (passed in
+// as a data URL by main), grouped by category. Tapping a tile places that piece
+// in the pond (opening the pond if it's hidden).
+const furnitureEl = document.getElementById('furniture');
+let furnitureLoaded = false;
+// itemId -> its picker tile, so we can flip the "on screen" highlight as pieces
+// come and go (from a click here or removing a piece via its window).
+const furnitureTiles = new Map();
+
+// One piece per type: highlight whichever types are currently placed.
+function applyShownFurniture(shown) {
+  const on = new Set(shown || []);
+  for (const [id, tile] of furnitureTiles) tile.classList.toggle('shown', on.has(id));
+}
+
+window.api.on('furniture:changed', ({ shown } = {}) => applyShownFurniture(shown));
+
+async function loadFurniture() {
+  if (furnitureLoaded) return;
+  const data = await window.api.invoke('furniture:catalog');
+  const items = (data && data.items) || [];
+  const sheets = (data && data.sheets) || {};
+  if (!items.length || !Object.keys(sheets).length) {
+    furnitureEl.innerHTML = '<div class="furniture-empty">The pond is unavailable.</div>';
+    return;
+  }
+  furnitureLoaded = true;
+
+  // Preview scale is capped so a big piece (e.g. a 48px wall panel) still fits
+  // the tile; tiny pictures render at the max so they stay legible.
+  const TILE = 60; // inner preview box (px)
+  const MAX_PREVIEW = 4;
+
+  const groups = [];
+  const byGroup = new Map();
+  for (const it of items) {
+    if (!byGroup.has(it.group)) {
+      byGroup.set(it.group, []);
+      groups.push(it.group);
+    }
+    byGroup.get(it.group).push(it);
+  }
+
+  furnitureEl.innerHTML = '';
+  furnitureTiles.clear();
+  for (const group of groups) {
+    const heading = document.createElement('div');
+    heading.className = 'furniture-group';
+    heading.textContent = group;
+    furnitureEl.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'furniture-grid';
+    for (const it of byGroup.get(group)) {
+      const tile = document.createElement('button');
+      tile.className = 'furniture-tile';
+      tile.title = `Place ${it.name} in the pond`;
+
+      const sheet = sheets[it.sheet];
+      const scale = Math.max(1, Math.min(MAX_PREVIEW, Math.floor(TILE / Math.max(it.w, it.h))));
+      const sprite = document.createElement('span');
+      sprite.className = 'furniture-sprite';
+      sprite.style.width = it.w * scale + 'px';
+      sprite.style.height = it.h * scale + 'px';
+      if (sheet && sheet.dataUrl) {
+        sprite.style.backgroundImage = `url(${sheet.dataUrl})`;
+        sprite.style.backgroundSize = `${sheet.w * scale}px ${sheet.h * scale}px`;
+        sprite.style.backgroundPosition = `-${it.x * scale}px -${it.y * scale}px`;
+      }
+
+      const label = document.createElement('span');
+      label.className = 'furniture-name';
+      label.textContent = it.name;
+
+      tile.append(sprite, label);
+      furnitureTiles.set(it.id, tile);
+      tile.addEventListener('click', async () => {
+        tile.classList.add('spawned');
+        setTimeout(() => tile.classList.remove('spawned'), 400);
+        // Toggle this type: place it if it isn't out, or remove it if it is
+        // (there's only ever one of each type on screen).
+        const res = await window.api.invoke('furniture:toggle', { itemId: it.id });
+        applyShownFurniture(res && res.shown);
+        flash(res && res.added ? `${it.name} placed` : `${it.name} removed`);
+      });
+      grid.appendChild(tile);
+    }
+    furnitureEl.appendChild(grid);
+  }
+
+  applyShownFurniture(data.shown);
+}
+
 // --- Appearance: skin ------------------------------------------------------
 function renderColors() {
   colorsEl.innerHTML = '';
@@ -169,6 +267,10 @@ async function load() {
   const sc = typeof state.scale === 'number' ? state.scale : 1;
   scaleEl.value = sc;
   scaleValEl.textContent = Math.round(sc * 100) + '%';
+
+  const fs = typeof state.furnitureScale === 'number' ? state.furnitureScale : 3;
+  furnitureScaleEl.value = fs;
+  furnitureScaleValEl.textContent = `${fs}×`;
 
   autoEl.checked = !!state.autoLaunch;
   frogButtonEl.checked = state.frogButton !== false;
@@ -216,6 +318,16 @@ scaleEl.addEventListener('input', () => {
 scaleEl.addEventListener('change', async () => {
   state = await window.api.invoke('settings:set', { scale: Number(scaleEl.value) });
   flash('Size updated');
+});
+
+// Default size for newly-placed furniture. Pieces you've already resized keep
+// their own size; scroll on a piece to resize it individually.
+furnitureScaleEl.addEventListener('input', () => {
+  furnitureScaleValEl.textContent = `${Number(furnitureScaleEl.value)}×`;
+});
+furnitureScaleEl.addEventListener('change', async () => {
+  state = await window.api.invoke('settings:set', { furnitureScale: Number(furnitureScaleEl.value) });
+  flash('Furniture size updated');
 });
 
 autoEl.addEventListener('change', async () => {

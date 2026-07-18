@@ -129,14 +129,49 @@ src/
     water/           Drink-water reminder
     countdown/       One-shot countdown timer
   slots/             The quick-launch slot picker popover
-  settings/          Settings hub (Applications / Appearance / Manage friends)
+  settings/          Settings hub (Applications / Appearance / Pond / Manage friends)
+  pond/              The pond: window + furniture catalog + lily pad
   friends/           Friends panel (invite, accept, online status)
   message/           Speak (direct message) composer
   invite/            Incoming friend-invite popup
   name/              First-run "name your frog" popup
   net/               Supabase signaling + hidden WebRTC mesh renderer
-assets/              The 6 frog spritesheets + tray icon
+assets/              The 6 frog spritesheets + tray icon + the pond art
+  furniture/         The furniture spritesheets (classic + garden planters)
 ```
+
+### The Pond
+
+The pond is a floating window (the pond art) that frogs and furniture live in.
+It opens automatically when you **join a room** — with everyone's frogs inside —
+or when you place furniture from **Settings → Pond**. Grab the water to drag the
+whole pond anywhere; everything in it comes along.
+
+**Furniture.** The Pond panel is a picker of pixel-art pieces — sofas, chairs,
+wardrobes, beds, desks, plants, rugs, and quirky garden planters — sliced from
+spritesheets in `assets/furniture/` and catalogued in `src/pond/catalog.js`
+(each item records its sheet + pixel box). Tap a piece to drop it in the pond:
+**drag** it around the water, **scroll** on it to resize, and hover for the
+**×** (or right-click) to remove it. Pieces are stored in *pond coordinates* in
+`config.json`, so your pond reappears intact on the next launch.
+
+**Rooms.** In a room, the pond is shared: furniture placement, movement, and
+size are synced to everyone (a roommate's pieces are view-only), and so is every
+frog's position on the water. While the pond is visible you can only move *your
+own* frog — roommates' frogs sit wherever their owners put them. Sync rides the
+same Supabase `room:<name>` broadcast channel as shouts and bounces — never
+P2P — so it's room-scoped, not friend-scoped. Broadcasts are ephemeral, so each
+member re-announces its pond (pieces + frog spot) whenever someone joins or
+reopens their pond; a member's pieces clear when they leave.
+
+**Hop out.** Hovering the pond reveals its buttons — **Hop out**, **Furniture**,
+and **Room info**. Hopping out hides the pond: the furniture disappears with it,
+frogs roam the desktop freely again, and a little **lily pad** is left behind.
+Drag the pad wherever you like; click it to open the pond again.
+
+The bundled art is from the "Classic Furniture" and "Garden Planters" pixel packs
+by [0-mem0ry](https://0-mem0ry.itch.io/). To add more, drop a sheet in
+`assets/furniture/`, register it under `SHEETS`, and add items to `ITEMS`.
 
 ## Apps
 

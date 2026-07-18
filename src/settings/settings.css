@@ -183,6 +183,68 @@ body {
   opacity: 0.8;
   margin: 0 0 12px;
 }
+
+/* --- Furniture picker ----------------------------------------------------- */
+.furniture-group {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.45;
+  margin: 14px 2px 8px;
+}
+.furniture-group:first-child {
+  margin-top: 2px;
+}
+.furniture-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+}
+.furniture-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 92px;
+  padding: 10px 6px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: none;
+  border-radius: 12px;
+  color: #eef0f3;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+.furniture-tile:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.furniture-tile:active,
+.furniture-tile.spawned {
+  transform: scale(0.94);
+  background: rgba(124, 92, 255, 0.22);
+}
+/* Types currently on screen — a persistent ring so they read as "placed". */
+.furniture-tile.shown {
+  background: rgba(124, 92, 255, 0.28);
+  box-shadow: inset 0 0 0 2px rgba(124, 92, 255, 0.9);
+}
+.furniture-sprite {
+  display: block;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+.furniture-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.15;
+}
+.furniture-empty {
+  font-size: 12px;
+  opacity: 0.6;
+  padding: 12px 2px;
+}
 .appblurb.muted {
   opacity: 0.5;
 }

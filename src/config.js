@@ -42,6 +42,24 @@ const DEFAULTS = {
   // Whether the frog itself acts as the 4th quick-launch slot. When off, the
   // frog shows no badge and a tap falls back to opening the journal.
   frogButton: false,
+  // Furniture placed in the pond. Each entry is a piece in *pond coordinates*
+  // (px/py from the pond window's top-left, so the layout is shareable):
+  // { uid, itemId, px, py, scale } where itemId indexes src/pond/catalog.js.
+  // Persisted so the pond you decorate reappears on the next launch.
+  furniture: [],
+  // Default size (integer pixel-scale factor) for newly-placed furniture, set by
+  // the Pond panel slider. Pieces you've resized keep their own size.
+  furnitureScale: 3,
+  // Last-known { px, py, scale } for each furniture type (keyed by itemId), so a
+  // piece returns to where you last put it even after you remove and re-place it.
+  furniturePositions: {},
+  // The pond: whether it's open (vs collapsed to the lily pad), where the pond
+  // window and the lily pad sit on screen, and where your frog's feet last
+  // rested in pond coordinates.
+  pondVisible: true,
+  pondPosition: null,
+  lilyPosition: null,
+  pondFrogPos: null,
   // Position is stored so the frog reappears where you left it.
   position: null,
   // Author handle written into note frontmatter.

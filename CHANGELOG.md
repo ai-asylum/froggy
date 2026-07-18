@@ -2,6 +2,16 @@
 
 All notable changes to Froggy are documented here. Dates are in UTC.
 
+## [Unreleased]
+
+### Added
+
+- **The Pond.** Froggy's frogs now have somewhere to live: a floating pond (hand-drawn art) that opens when you join a room — with everyone's frogs inside — or when you place furniture. Grab the water to drag the whole pond around; the frogs and furniture come along for the ride.
+- **Shared pond, synced frogs.** In a room, the pond is shared with everyone in it: every frog's position on the water is live-synced, so you see your roommates' frogs hop around as they drag them. While the pond is visible only your *own* frog can be moved — roommates' frogs sit where their owners put them. Hide the pond and all frogs roam the desktop freely again.
+- **Furniture.** A new **Settings → Pond** picker decorates the pond with 40+ pixel-art pieces — sofas, chairs, wardrobes, beds, desks, plants, rugs, and quirky garden planters (barrels, buckets, tyres, even a toilet). Tap a piece to drop it in the pond — one of each type at a time (tap a highlighted piece again to remove it), but mix as many different pieces as you like. Drag them around the water, scroll on one to resize, or hover for the ×. Each piece remembers where (and how big) you last put it, and your pond is restored on the next launch. In a room, placement, movement, and size are all synced to everyone (a roommate's pieces are view-only).
+- **Furniture size slider.** The Pond panel has a **Size** slider (1×–12×) setting how big new pieces spawn. Pieces you've already resized keep their own size; scroll on any piece to resize it individually.
+- **Hop out + the lily pad.** Hovering the pond reveals its buttons — **Hop out**, **Furniture**, and **Room info**. Hopping out hides the pond (and its furniture), leaving behind a draggable little lily pad; click the pad to open the pond again.
+
 ## [1.3.0] - 2026-07-17
 
 ### Added
